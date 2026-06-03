@@ -1,12 +1,15 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
 const EDGE_LM_REPO: &str = "git+https://github.com/TheStageAI/edge-lm.git";
 const SERVER_PY: &str = include_str!("server.py");
+const DEFAULT_MODELS_DIR: &str = "models";
 const PYTHON_CANDIDATES: &[&str] = &[
     "python3.14",
     "python3.13",
@@ -40,9 +43,14 @@ struct Config {
     port: u16,
     model: String,
     pi_models: Vec<String>,
+    models_dir: PathBuf,
     size: String,
     context_tokens: usize,
     reinstall: bool,
+    preload_model: bool,
+    vendor_model: bool,
+    offline: bool,
+    prefer_remote: bool,
 }
 
 impl Default for Config {
@@ -57,9 +65,14 @@ impl Default for Config {
                 "TheStageAI/gemma-4-E4B-it".to_string(),
                 "TheStageAI/gemma-4-E2B-it".to_string(),
             ],
+            models_dir: PathBuf::from(DEFAULT_MODELS_DIR),
             size: "m".to_string(),
             context_tokens: 128_000,
             reinstall: false,
+            preload_model: false,
+            vendor_model: false,
+            offline: false,
+            prefer_remote: false,
         }
     }
 }
@@ -86,6 +99,8 @@ fn real_main() -> Result<(), String> {
         return Ok(());
     }
 
+    restore_split_vendored_models(&config)?;
+
     fs::create_dir_all(&runtime_dir)
         .map_err(|e| format!("failed to create {}: {e}", runtime_dir.display()))?;
 
@@ -97,6 +112,12 @@ fn real_main() -> Result<(), String> {
     ensure_pip(&venv_python)?;
     install_dependencies(&venv_python, &git, &runtime_dir, config.reinstall)?;
     write_server(&runtime_dir)?;
+    if config.vendor_model {
+        vendor_model(&venv_python, &config)?;
+    }
+    if config.preload_model {
+        preload_model(&venv_python, &runtime_dir, &config)?;
+    }
     print_pi_config(&config);
 
     if config.action == Action::Setup {
@@ -135,6 +156,10 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
                 i += 1;
                 config.model = value_after(&args, i, "--model")?;
             }
+            "--models-dir" => {
+                i += 1;
+                config.models_dir = PathBuf::from(value_after(&args, i, "--models-dir")?);
+            }
             "--pi-models" => {
                 i += 1;
                 config.pi_models = value_after(&args, i, "--pi-models")?
@@ -158,6 +183,10 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
                     .map_err(|_| "--context must be a number".to_string())?;
             }
             "--reinstall" => config.reinstall = true,
+            "--preload-model" => config.preload_model = true,
+            "--vendor-model" => config.vendor_model = true,
+            "--offline" => config.offline = true,
+            "--prefer-remote" => config.prefer_remote = true,
             other => return Err(format!("unknown argument: {other}")),
         }
         i += 1;
@@ -184,10 +213,15 @@ fn print_help() {
            --host HOST         Bind host, default 127.0.0.1\n\
            --port PORT         Bind port, default 8000\n\
            --model MODEL       Hugging Face model id\n\
+           --models-dir DIR    Vendored models directory, default models\n\
            --pi-models LIST    Comma-separated Pi model ids, default E4B,E2B\n\
            --size SIZE         Edge-LM size, default m\n\
            --context TOKENS    Context window, default 128000\n\
            --reinstall         Reinstall Python dependencies\n\
+           --preload-model     Download/cache the selected model during setup/run\n\
+           --vendor-model      Download the selected model into --models-dir\n\
+           --offline           Use local model/dependency caches only while running\n\
+           --prefer-remote     Ignore vendored model directory and use --model directly\n\
            -h, --help          Show this help"
     );
 }
@@ -397,17 +431,157 @@ fn write_server(runtime_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn run_server(venv_python: &Path, runtime_dir: &Path, config: &Config) -> Result<(), String> {
+fn vendor_model(venv_python: &Path, config: &Config) -> Result<(), String> {
+    if model_looks_like_path(&config.model) {
+        return Err("--vendor-model expects --model to be a Hugging Face repo id".to_string());
+    }
+
+    let destination = vendored_model_path(config)?;
+    fs::create_dir_all(&destination)
+        .map_err(|e| format!("failed to create {}: {e}", destination.display()))?;
+
     println!(
-        "starting server at http://{}:{} using {} ({})",
-        config.host, config.port, config.model, config.size
+        "downloading model into repository: {} -> {}",
+        config.model,
+        destination.display()
+    );
+
+    let code = "\
+from huggingface_hub import snapshot_download\n\
+import os\n\
+repo_id = os.environ['EDGE_LM_MODEL_ID']\n\
+local_dir = os.environ['EDGE_LM_VENDOR_DIR']\n\
+snapshot_download(repo_id=repo_id, local_dir=local_dir)\n\
+print(f'vendored {repo_id} into {local_dir}')\n";
+
+    run_inherit(
+        Command::new(venv_python)
+            .arg("-c")
+            .arg(code)
+            .env("EDGE_LM_MODEL_ID", &config.model)
+            .env("EDGE_LM_VENDOR_DIR", &destination),
+    )
+}
+
+fn restore_split_vendored_models(config: &Config) -> Result<(), String> {
+    if config.prefer_remote || model_looks_like_path(&config.model) {
+        return Ok(());
+    }
+
+    let vendored = vendored_model_path(config)?;
+    if !vendored.exists() {
+        return Ok(());
+    }
+
+    let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
+    let entries = fs::read_dir(&vendored)
+        .map_err(|e| format!("failed to read {}: {e}", vendored.display()))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("failed to read {}: {e}", vendored.display()))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(file_name) = path.file_name().and_then(OsStr::to_str) else {
+            continue;
+        };
+        let Some(base_name) = split_part_base_name(file_name) else {
+            continue;
+        };
+        groups
+            .entry(vendored.join(base_name))
+            .or_default()
+            .push(path);
+    }
+
+    for (target, mut parts) in groups {
+        if target.exists() {
+            continue;
+        }
+
+        parts.sort();
+        println!(
+            "reassembling vendored model file: {} from {} parts",
+            target.display(),
+            parts.len()
+        );
+
+        let mut output = File::create(&target)
+            .map_err(|e| format!("failed to create {}: {e}", target.display()))?;
+        for part in parts {
+            let mut input =
+                File::open(&part).map_err(|e| format!("failed to open {}: {e}", part.display()))?;
+            io::copy(&mut input, &mut output)
+                .map_err(|e| format!("failed to append {}: {e}", part.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn split_part_base_name(file_name: &str) -> Option<&str> {
+    let (base_name, part_number) = file_name.rsplit_once(".part")?;
+    if base_name.is_empty()
+        || part_number.is_empty()
+        || !part_number.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(base_name)
+}
+
+fn preload_model(venv_python: &Path, runtime_dir: &Path, config: &Config) -> Result<(), String> {
+    let model_source = model_source(config)?;
+    println!(
+        "preloading model into local cache: {} ({}) from {}",
+        config.model,
+        config.size,
+        model_source.display()
+    );
+
+    let code = "\
+from edge_lm.models.load import load\n\
+import os\n\
+model = os.environ['EDGE_LM_MODEL_SOURCE']\n\
+size = os.environ['EDGE_LM_SIZE']\n\
+load(model, size=size)\n\
+print(f'cached {model} ({size})')\n";
+
+    run_inherit(
+        Command::new(venv_python)
+            .arg("-c")
+            .arg(code)
+            .current_dir(runtime_dir)
+            .env("EDGE_LM_MODEL_SOURCE", &model_source)
+            .env("EDGE_LM_SIZE", &config.size)
+            .env("HF_HOME", runtime_dir.join("hf-home"))
+            .env(
+                "TRANSFORMERS_CACHE",
+                runtime_dir.join("hf-home").join("transformers"),
+            ),
+    )
+}
+
+fn run_server(venv_python: &Path, runtime_dir: &Path, config: &Config) -> Result<(), String> {
+    let model_source = model_source(config)?;
+    println!(
+        "starting server at http://{}:{} using {} ({}) from {}",
+        config.host,
+        config.port,
+        config.model,
+        config.size,
+        model_source.display()
     );
     println!("runtime: {}", runtime_dir.display());
 
-    let status = Command::new(venv_python)
+    let mut command = Command::new(venv_python);
+    command
         .arg(runtime_dir.join("server.py"))
         .current_dir(runtime_dir)
-        .env("EDGE_LM_MODEL", &config.model)
+        .env("EDGE_LM_MODEL_SOURCE", &model_source)
+        .env("EDGE_LM_MODEL_ID", &config.model)
         .env("EDGE_LM_SIZE", &config.size)
         .env("EDGE_LM_CONTEXT_TOKENS", config.context_tokens.to_string())
         .env("EDGE_LM_HOST", &config.host)
@@ -416,7 +590,14 @@ fn run_server(venv_python: &Path, runtime_dir: &Path, config: &Config) -> Result
         .env(
             "TRANSFORMERS_CACHE",
             runtime_dir.join("hf-home").join("transformers"),
-        )
+        );
+    if config.offline {
+        command
+            .env("HF_HUB_OFFLINE", "1")
+            .env("TRANSFORMERS_OFFLINE", "1");
+    }
+
+    let status = command
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -424,6 +605,42 @@ fn run_server(venv_python: &Path, runtime_dir: &Path, config: &Config) -> Result
         .map_err(|e| format!("failed to start server: {e}"))?;
 
     exit_status_to_result(status, "server exited with an error")
+}
+
+fn model_source(config: &Config) -> Result<PathBuf, String> {
+    if config.prefer_remote {
+        return Ok(PathBuf::from(&config.model));
+    }
+
+    if model_looks_like_path(&config.model) {
+        return Ok(absolutize(Path::new(&config.model))?);
+    }
+
+    let vendored = vendored_model_path(config)?;
+    if vendored.exists() {
+        return Ok(vendored);
+    }
+
+    Ok(PathBuf::from(&config.model))
+}
+
+fn vendored_model_path(config: &Config) -> Result<PathBuf, String> {
+    let models_dir = absolutize(&config.models_dir)?;
+    let mut path = models_dir;
+    for part in config.model.split('/') {
+        if part.is_empty() || part == "." || part == ".." {
+            return Err(format!("invalid model id for vendoring: {}", config.model));
+        }
+        path.push(part);
+    }
+    Ok(path)
+}
+
+fn model_looks_like_path(value: &str) -> bool {
+    value.starts_with('.')
+        || value.starts_with('/')
+        || value.contains('\\')
+        || Path::new(value).exists()
 }
 
 fn print_pi_config(config: &Config) {

@@ -15,7 +15,11 @@ from mlx_vlm import stream_generate
 
 model = None
 tokenizer = None
-MODEL_NAME = os.environ.get("EDGE_LM_MODEL", "TheStageAI/gemma-4-E4B-it")
+MODEL_SOURCE = os.environ.get(
+    "EDGE_LM_MODEL_SOURCE",
+    os.environ.get("EDGE_LM_MODEL", "TheStageAI/gemma-4-E4B-it"),
+)
+MODEL_NAME = os.environ.get("EDGE_LM_MODEL_ID", MODEL_SOURCE)
 MODEL_SIZE = os.environ.get("EDGE_LM_SIZE", "m")
 MAX_CONTEXT_TOKENS = int(os.environ.get("EDGE_LM_CONTEXT_TOKENS", "128000"))
 HOST = os.environ.get("EDGE_LM_HOST", "127.0.0.1")
@@ -113,7 +117,7 @@ def build_prompt_ids(
 async def lifespan(app: FastAPI):
     global model, tokenizer
     print("Загрузка оптимизированной Gemma-4 в Unified Memory...")
-    model, tokenizer = load(MODEL_NAME, size=MODEL_SIZE)
+    model, tokenizer = load(MODEL_SOURCE, size=MODEL_SIZE)
     print("Модель успешно загружена и готова к работе через MLX!")
     yield
     print("Выгрузка модели из памяти...")

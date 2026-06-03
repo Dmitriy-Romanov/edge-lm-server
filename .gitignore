@@ -1,3 +1,4 @@
 /target/
 /.edge-lm-server/
 .DS_Store
+models/**/model_*.safetensors

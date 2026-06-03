@@ -46,8 +46,126 @@ Useful flags:
 ./edge-lm-server --pi-models TheStageAI/gemma-4-E4B-it
 ./edge-lm-server --context 128000
 ./edge-lm-server setup
+./edge-lm-server setup --vendor-model
+./edge-lm-server setup --preload-model
+./edge-lm-server --offline
+./edge-lm-server --prefer-remote
 ./edge-lm-server clean
 ```
+
+## Vendored models
+
+The launcher can use a model stored inside this repository. By default it looks
+for:
+
+```bash
+models/TheStageAI/gemma-4-E4B-it
+```
+
+If that directory exists, it is used as the model source. Pi Agent still sees the
+model id as `TheStageAI/gemma-4-E4B-it`; only the physical load path changes.
+
+To download the default model into the repository:
+
+```bash
+cargo build --release
+./target/release/edge-lm-server setup --vendor-model
+```
+
+To vendor another model:
+
+```bash
+./target/release/edge-lm-server setup \
+  --model TheStageAI/gemma-4-E2B-it \
+  --size m \
+  --vendor-model
+```
+
+Large model files under `models/` are configured for Git LFS in
+`.gitattributes`. Before committing vendored models, install and initialize Git
+LFS:
+
+```bash
+brew install git-lfs
+git lfs install
+git add .gitattributes models/
+git commit -m "Vendor Edge-LM model weights"
+```
+
+GitHub LFS rejects individual files over 2 GiB on free accounts. The large
+`model_*.safetensors` files are therefore stored as `.part00`, `.part01`, ...
+chunks. On startup, the launcher reassembles missing `model_*.safetensors` files
+from those chunks before loading the model.
+
+After a fresh clone on another Mac:
+
+```bash
+git lfs pull
+cargo build --release
+./target/release/edge-lm-server
+```
+
+If you want to try a newer upstream model version even when a vendored copy is
+present, run with:
+
+```bash
+./target/release/edge-lm-server --prefer-remote
+```
+
+## Runtime cache
+
+If you want to avoid depending on the model still being downloadable later,
+preload it while the model is available:
+
+```bash
+cargo build --release
+./target/release/edge-lm-server setup --preload-model
+```
+
+This installs the Python runtime and caches the selected model under:
+
+```bash
+.edge-lm-server/hf-home
+```
+
+After that, run the gateway in offline mode:
+
+```bash
+./target/release/edge-lm-server --offline
+```
+
+The `--offline` flag sets Hugging Face and Transformers offline environment
+variables for the server process, so model loading uses the local cache.
+
+To preload a different model or size:
+
+```bash
+./target/release/edge-lm-server setup \
+  --model TheStageAI/gemma-4-E2B-it \
+  --size m \
+  --preload-model
+```
+
+## Docker note
+
+The current server uses Apple's MLX runtime (`mlx.core`) through Edge-LM. MLX is
+designed for Apple silicon and macOS/Metal, while normal Docker containers on a
+Mac run Linux inside Docker Desktop's VM. That means a regular Docker image can
+hold Python dependencies and cached files, but it is not a reliable autonomous
+runtime for this MLX gateway.
+
+For this repository, the practical offline path is therefore:
+
+1. Vendor the model with `setup --vendor-model`.
+2. Commit/push it through Git LFS.
+3. Clone the repository and run the gateway normally on another Apple silicon
+   Mac.
+
+If a true Linux Docker container is required, the backend should be changed to a
+Linux-compatible inference runtime such as llama.cpp, Ollama, or vLLM, using a
+model format supported by that runtime. The Pi Agent provider can stay
+OpenAI-compatible, but the model/runtime layer would be different from this MLX
+implementation.
 
 Cleanup is simple: remove the binary and the runtime directory. The `clean`
 command removes the runtime directory for you.
