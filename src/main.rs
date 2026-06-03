@@ -12,6 +12,22 @@ const SERVER_PY: &str = include_str!("server.py");
 const DEFAULT_MODELS_DIR: &str = "models";
 const DEFAULT_MODEL: &str = "TheStageAI/gemma-4-E4B-it";
 const SMALLER_MODEL: &str = "TheStageAI/gemma-4-E2B-it";
+const MODEL_OPTIONS: &[ModelOption] = &[
+    ModelOption {
+        id: DEFAULT_MODEL,
+        name: "E4B",
+        description: "best vendored quality",
+        size_m_download: "model 2.3 GB, total about 2.9 GB",
+        size_l_download: "model 2.8 GB, total about 3.4 GB",
+    },
+    ModelOption {
+        id: SMALLER_MODEL,
+        name: "E2B",
+        description: "smaller and faster",
+        size_m_download: "model 1.1 GB, total about 1.9 GB",
+        size_l_download: "model 1.4 GB, total about 2.2 GB",
+    },
+];
 const PYTHON_CANDIDATES: &[&str] = &[
     "python3.14",
     "python3.13",
@@ -54,6 +70,21 @@ struct Config {
     vendor_model: bool,
     offline: bool,
     prefer_remote: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ModelOption {
+    id: &'static str,
+    name: &'static str,
+    description: &'static str,
+    size_m_download: &'static str,
+    size_l_download: &'static str,
+}
+
+#[derive(Debug, Clone)]
+struct DownloadedModel {
+    model: String,
+    size: String,
 }
 
 impl Default for Config {
@@ -209,48 +240,52 @@ fn value_after(args: &[String], index: usize, flag: &str) -> Result<String, Stri
 fn configure_from_menu(config: &mut Config) -> Result<(), String> {
     println!("edge-lm-server setup");
     println!();
-    println!("Choose model source:");
-    println!("  1) Remote source (recommended first run, no Git LFS)");
-    println!("  2) Vendored GitHub LFS files (offline-safe, downloads selected files)");
-    let source = prompt_choice("Model source", &["1", "2"], "1")?;
 
-    config.prefer_remote = source == "1";
-
-    if config.prefer_remote {
-        println!();
-        println!("Choose model:");
-        println!("  1) TheStageAI/gemma-4-E4B-it (default)");
-        println!("  2) TheStageAI/gemma-4-E2B-it (smaller)");
-        let model = prompt_choice("Model", &["1", "2"], "1")?;
-        config.model = if model == "2" {
-            SMALLER_MODEL.to_string()
-        } else {
-            DEFAULT_MODEL.to_string()
-        };
+    let downloaded = downloaded_vendored_models(config)?;
+    if downloaded.is_empty() {
+        println!("Downloaded vendored models: none");
     } else {
-        println!();
-        println!("Vendored files are currently available for:");
-        println!("  1) TheStageAI/gemma-4-E4B-it (default)");
-        println!("  2) TheStageAI/gemma-4-E2B-it (smaller)");
-        let model = prompt_choice("Model", &["1", "2"], "1")?;
-        config.model = if model == "2" {
-            SMALLER_MODEL.to_string()
-        } else {
-            DEFAULT_MODEL.to_string()
-        };
+        println!("Downloaded vendored models:");
+        for (index, item) in downloaded.iter().enumerate() {
+            println!(
+                "  {}) {} size {} ({})",
+                index + 1,
+                model_short_label(&item.model),
+                item.size,
+                model_size_download_label(&item.model, &item.size)
+            );
+        }
     }
 
     println!();
-    println!("Choose model size:");
-    println!("  1) m (default, smaller)");
-    println!("  2) l (larger, needs more memory)");
-    let size = prompt_choice("Size", &["1", "2"], "1")?;
-    config.size = if size == "2" { "l" } else { "m" }.to_string();
-    config.pi_models = vec![config.model.clone()];
+    println!("Choose what to do:");
+    let action = if downloaded.is_empty() {
+        println!("  1) Download selected model from GitHub LFS (offline-safe)");
+        println!("  2) Use remote source (no Git LFS, downloads from upstream)");
+        prompt_choice("Action", &["1", "2"], "2")?
+    } else {
+        println!("  1) Start server with downloaded model");
+        println!("  2) Download selected model from GitHub LFS (offline-safe)");
+        println!("  3) Use remote source (no Git LFS, downloads from upstream)");
+        prompt_choice("Action", &["1", "2", "3"], "1")?
+    };
 
-    if !config.prefer_remote {
+    if action == "1" && !downloaded.is_empty() {
+        let selected = choose_downloaded_model(&downloaded)?;
+        config.model = selected.model;
+        config.size = selected.size;
+        config.prefer_remote = false;
+    } else if (downloaded.is_empty() && action == "1") || (!downloaded.is_empty() && action == "2")
+    {
+        config.prefer_remote = false;
+        choose_model_and_size(config, true)?;
         ensure_vendored_model_files(config)?;
+    } else {
+        config.prefer_remote = true;
+        choose_model_and_size(config, false)?;
     }
+
+    config.pi_models = vec![config.model.clone()];
 
     println!();
     println!(
@@ -266,6 +301,133 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
     println!();
 
     Ok(())
+}
+
+fn choose_downloaded_model(downloaded: &[DownloadedModel]) -> Result<DownloadedModel, String> {
+    if downloaded.len() == 1 {
+        println!();
+        println!(
+            "Using downloaded model: {} size {} ({})",
+            model_short_label(&downloaded[0].model),
+            downloaded[0].size,
+            model_size_download_label(&downloaded[0].model, &downloaded[0].size)
+        );
+        return Ok(downloaded[0].clone());
+    }
+
+    println!();
+    println!("Choose downloaded model:");
+    for (index, item) in downloaded.iter().enumerate() {
+        println!(
+            "  {}) {} size {} ({})",
+            index + 1,
+            model_short_label(&item.model),
+            item.size,
+            model_size_download_label(&item.model, &item.size)
+        );
+    }
+    let allowed = numbered_choices(downloaded.len());
+    let allowed_refs = allowed.iter().map(String::as_str).collect::<Vec<_>>();
+    let choice = prompt_choice("Downloaded model", &allowed_refs, "1")?;
+    let index = choice
+        .parse::<usize>()
+        .map_err(|_| "invalid downloaded model choice".to_string())?
+        - 1;
+    Ok(downloaded[index].clone())
+}
+
+fn choose_model_and_size(config: &mut Config, show_download_sizes: bool) -> Result<(), String> {
+    println!();
+    println!("Choose model:");
+    for (index, option) in MODEL_OPTIONS.iter().enumerate() {
+        if show_download_sizes {
+            println!(
+                "  {}) {} ({}, {}; m {}, l {})",
+                index + 1,
+                option.id,
+                option.name,
+                option.description,
+                option.size_m_download,
+                option.size_l_download
+            );
+        } else {
+            println!(
+                "  {}) {} ({}, {})",
+                index + 1,
+                option.id,
+                option.name,
+                option.description
+            );
+        }
+    }
+    let model_choices = numbered_choices(MODEL_OPTIONS.len());
+    let model_choice_refs = model_choices.iter().map(String::as_str).collect::<Vec<_>>();
+    let model = prompt_choice("Model", &model_choice_refs, "1")?;
+    let option = MODEL_OPTIONS
+        .get(
+            model
+                .parse::<usize>()
+                .map_err(|_| "invalid model choice".to_string())?
+                - 1,
+        )
+        .ok_or_else(|| "invalid model choice".to_string())?;
+    config.model = option.id.to_string();
+
+    println!();
+    println!("Choose model size:");
+    if show_download_sizes {
+        println!("  1) m (default, download {})", option.size_m_download);
+        println!("  2) l (larger, download {})", option.size_l_download);
+    } else {
+        println!("  1) m (default, smaller)");
+        println!("  2) l (larger, needs more memory)");
+    }
+    let size = prompt_choice("Size", &["1", "2"], "1")?;
+    config.size = if size == "2" { "l" } else { "m" }.to_string();
+
+    Ok(())
+}
+
+fn downloaded_vendored_models(config: &Config) -> Result<Vec<DownloadedModel>, String> {
+    let mut downloaded = Vec::new();
+    for option in MODEL_OPTIONS {
+        for size in ["m", "l"] {
+            let mut candidate = config.clone();
+            candidate.model = option.id.to_string();
+            candidate.size = size.to_string();
+            candidate.prefer_remote = false;
+            if vendored_model_ready(&candidate)? {
+                downloaded.push(DownloadedModel {
+                    model: candidate.model,
+                    size: candidate.size,
+                });
+            }
+        }
+    }
+    Ok(downloaded)
+}
+
+fn model_short_label(model: &str) -> String {
+    MODEL_OPTIONS
+        .iter()
+        .find(|option| option.id == model)
+        .map(|option| format!("{} ({})", option.id, option.name))
+        .unwrap_or_else(|| model.to_string())
+}
+
+fn model_size_download_label(model: &str, size: &str) -> &'static str {
+    let Some(option) = MODEL_OPTIONS.iter().find(|option| option.id == model) else {
+        return "unknown size";
+    };
+    if size == "l" {
+        option.size_l_download
+    } else {
+        option.size_m_download
+    }
+}
+
+fn numbered_choices(count: usize) -> Vec<String> {
+    (1..=count).map(|index| index.to_string()).collect()
 }
 
 fn prompt_choice(prompt: &str, allowed: &[&str], default: &str) -> Result<String, String> {
@@ -593,9 +755,12 @@ fn vendored_lfs_include_paths(config: &Config) -> Vec<String> {
     };
     let base = format!("{DEFAULT_MODELS_DIR}/{org}/{repo}");
     let mut paths = vec![
+        format!("{base}/config.json"),
         format!("{base}/audio_tower.safetensors"),
         format!("{base}/vision_tower.safetensors"),
         format!("{base}/tokenizer.json"),
+        format!("{base}/tokenizer_config.json"),
+        format!("{base}/chat_template.jinja"),
         format!("{base}/ple_{}.safetensors", config.size),
     ];
 
@@ -628,6 +793,9 @@ fn vendored_model_ready(config: &Config) -> Result<bool, String> {
             .all(|path| real_file_at_least(path, 100 * 1024 * 1024));
 
     Ok(model_ready
+        && real_file_at_least(&vendored.join("config.json"), 1024)
+        && real_file_at_least(&vendored.join("tokenizer_config.json"), 1024)
+        && real_file_at_least(&vendored.join("chat_template.jinja"), 1024)
         && real_file_at_least(
             &vendored.join(format!("ple_{}.safetensors", config.size)),
             100 * 1024 * 1024,
@@ -790,7 +958,7 @@ fn run_server(venv_python: &Path, runtime_dir: &Path, config: &Config) -> Result
             "TRANSFORMERS_CACHE",
             runtime_dir.join("hf-home").join("transformers"),
         );
-    if config.offline {
+    if config.offline || !config.prefer_remote {
         command
             .env("HF_HUB_OFFLINE", "1")
             .env("TRANSFORMERS_OFFLINE", "1");

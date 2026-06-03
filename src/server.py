@@ -116,11 +116,11 @@ def build_prompt_ids(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global model, tokenizer
-    print("Загрузка оптимизированной Gemma-4 в Unified Memory...")
+    print("Loading optimized Gemma-4 into unified memory...")
     model, tokenizer = load(MODEL_SOURCE, size=MODEL_SIZE)
-    print("Модель успешно загружена и готова к работе через MLX!")
+    print("Model loaded successfully and ready through MLX.")
     yield
-    print("Выгрузка модели из памяти...")
+    print("Unloading model from memory...")
 
 app = FastAPI(title="TheStage AI Edge-LM OpenAI Server", lifespan=lifespan)
 
@@ -142,13 +142,13 @@ async def list_models():
 async def chat_completions(body: Dict[str, Any]):
     global model, tokenizer
     if model is None or tokenizer is None:
-        raise HTTPException(status_code=500, detail="Модель еще не загружена в память")
+        raise HTTPException(status_code=500, detail="Model is not loaded yet")
     
     messages = body.get("messages", [])
     if not messages:
-        raise HTTPException(status_code=400, detail="Массив 'messages' пуст или отсутствует")
+        raise HTTPException(status_code=400, detail="'messages' is missing or empty")
     
-    # Забираем то, что просит Pi, но если там пусто или мало — ставим 2048
+    # Use Pi Agent's requested value, but keep generation useful for tiny values.
     max_tokens = body.get("max_tokens", 16000)
     if max_tokens < 512: 
         max_tokens = 16000
@@ -176,9 +176,8 @@ async def chat_completions(body: Dict[str, Any]):
         flush=True,
     )
 
-    # --- ИСПРАВЛЕННЫЙ АСИНХРОННЫЙ ГЕНЕРАТОР (Остается в потоке MLX) ---
     async def generate_chunks_async():
-        # Отправляем начальный чанк с ролью
+        # Send the initial role chunk before generation output.
         initial_chunk = {
             "id": chat_id, "object": "chat.completion.chunk", "created": int(time.time()), "model": model_field,
             "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
@@ -208,7 +207,7 @@ async def chat_completions(body: Dict[str, Any]):
                     flush=True,
                 )
                 last_log_at = now
-            # Даем FastAPI передохнуть и отправить чанк, оставаясь в текущем потоке
+            # Let FastAPI flush chunks while staying on the MLX thread.
             await asyncio.sleep(0)
 
         generated_text = "".join(text_parts)
@@ -273,7 +272,7 @@ async def chat_completions(body: Dict[str, Any]):
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             await asyncio.sleep(0)
         
-        # Отправляем финальный чанк останова
+        # Send the final stop chunk.
         final_chunk = {
             "id": chat_id, "object": "chat.completion.chunk", "created": int(time.time()), "model": model_field,
             "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
@@ -296,7 +295,6 @@ async def chat_completions(body: Dict[str, Any]):
             yield f"data: {json.dumps(usage_chunk)}\n\n"
         yield "data: [DONE]\n\n"
 
-    # Передаем асинхронный генератор в StreamingResponse
     return StreamingResponse(generate_chunks_async(), media_type="text/event-stream")
 
 if __name__ == "__main__":

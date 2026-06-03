@@ -30,6 +30,7 @@ cd edge-lm-server
 
 `./run` builds the launcher and opens a small menu. The menu asks:
 
+- whether to start an already downloaded vendored model, if one is present
 - where to load the model from: remote source or vendored GitHub LFS files
 - which model to run
 - which size to run
@@ -40,6 +41,10 @@ does depend on the upstream model still being available.
 The vendored GitHub option is the offline-safe path. It requires Git LFS, but it
 downloads only the selected model and size instead of pulling every model file
 in the repository.
+
+When you start an already downloaded vendored model, the launcher runs it in
+Hugging Face offline mode so missing local files do not trigger surprise network
+downloads.
 
 ## Models
 

@@ -105,9 +105,12 @@ Git LFS.
 The interactive menu uses `git lfs pull --include ... --exclude ""` to download
 only the files needed for the selected model and size. For E4B `m`, it includes:
 
+- shared `config.json`
 - shared `audio_tower.safetensors`
 - shared `vision_tower.safetensors`
 - shared `tokenizer.json`
+- shared `tokenizer_config.json`
+- shared `chat_template.jinja`
 - `ple_m.safetensors`
 - `model_m.safetensors.part00`
 - `model_m.safetensors.part01`
@@ -119,6 +122,11 @@ of split parts.
 The launcher checks whether selected files are already present and real LFS
 content, not pointer files, before pulling. This protects repeat runs from
 re-downloading the same model files.
+
+Vendored runs automatically set `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`.
+This is intentional: starting a downloaded model must not silently fetch missing
+tokenizer/template files from Hugging Face. If a vendored model is incomplete,
+the launcher should fail or pull the selected files explicitly through the menu.
 
 ## Updating vendored models
 
