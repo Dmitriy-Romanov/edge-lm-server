@@ -1,4 +1,5 @@
 /target/
 /.edge-lm-server/
 .DS_Store
-models/**/model_*.safetensors
+models/**/.cache/
+models/TheStageAI/gemma-4-E4B-it/model_*.safetensors

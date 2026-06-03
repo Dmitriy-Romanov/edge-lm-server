@@ -16,6 +16,7 @@ The Rust binary:
   `uvicorn`
 - writes the bundled `src/server.py` into the runtime directory
 - starts the server with the selected model configuration
+- supports an interactive `menu` action used by the root `./run` script
 
 The Python server:
 
@@ -38,10 +39,11 @@ The default model is:
 TheStageAI/gemma-4-E4B-it
 ```
 
-The launcher looks for a vendored copy at:
+The repository currently vendors:
 
 ```bash
 models/TheStageAI/gemma-4-E4B-it
+models/TheStageAI/gemma-4-E2B-it
 ```
 
 If that directory exists and `--prefer-remote` is not set, the launcher passes
@@ -51,11 +53,33 @@ the local path as `EDGE_LM_MODEL_SOURCE`. It still passes the public model id as
 If `--prefer-remote` is set, vendored files are ignored and the model id is used
 directly as the load source.
 
+The user-facing entry point is:
+
+```bash
+./run
+```
+
+That script builds the release binary and runs:
+
+```bash
+./target/release/edge-lm-server menu
+```
+
+The README intentionally recommends:
+
+```bash
+GIT_LFS_SKIP_SMUDGE=1 git clone ...
+```
+
+This prevents an installed Git LFS smudge filter from downloading every model
+file during clone. The menu can then selectively download only the selected
+vendored size.
+
 ## Split model files
 
-GitHub LFS rejects individual files over 2 GiB on free accounts. The full
-`model_l.safetensors` and `model_m.safetensors` files are therefore not tracked
-directly. They are stored as LFS chunks:
+GitHub LFS rejects individual files over 2 GiB on free accounts. For E4B, the
+full `model_l.safetensors` and `model_m.safetensors` files are therefore not
+tracked directly. They are stored as LFS chunks:
 
 ```bash
 models/TheStageAI/gemma-4-E4B-it/model_l.safetensors.part00
@@ -71,10 +95,30 @@ reassembles the file before starting Python.
 The restored full files are ignored by git:
 
 ```bash
-models/**/model_*.safetensors
+models/TheStageAI/gemma-4-E4B-it/model_*.safetensors
 ```
 
-The chunk files are tracked by Git LFS through `.gitattributes`.
+E2B model files are below the GitHub LFS per-object limit, so
+`model_m.safetensors` and `model_l.safetensors` are tracked directly through
+Git LFS.
+
+The interactive menu uses `git lfs pull --include ... --exclude ""` to download
+only the files needed for the selected model and size. For E4B `m`, it includes:
+
+- shared `audio_tower.safetensors`
+- shared `vision_tower.safetensors`
+- shared `tokenizer.json`
+- `ple_m.safetensors`
+- `model_m.safetensors.part00`
+- `model_m.safetensors.part01`
+
+For E4B `l`, it swaps the `m` files for `ple_l` and `model_l` parts. For E2B,
+it pulls the full `model_m.safetensors` or `model_l.safetensors` file instead
+of split parts.
+
+The launcher checks whether selected files are already present and real LFS
+content, not pointer files, before pulling. This protects repeat runs from
+re-downloading the same model files.
 
 ## Updating vendored models
 

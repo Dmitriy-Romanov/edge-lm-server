@@ -3,13 +3,15 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::fs::File;
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
 const EDGE_LM_REPO: &str = "git+https://github.com/TheStageAI/edge-lm.git";
 const SERVER_PY: &str = include_str!("server.py");
 const DEFAULT_MODELS_DIR: &str = "models";
+const DEFAULT_MODEL: &str = "TheStageAI/gemma-4-E4B-it";
+const SMALLER_MODEL: &str = "TheStageAI/gemma-4-E2B-it";
 const PYTHON_CANDIDATES: &[&str] = &[
     "python3.14",
     "python3.13",
@@ -30,6 +32,7 @@ const BREW_PYTHON_FORMULAE: &[&str] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
     Run,
+    Menu,
     Setup,
     Clean,
     Help,
@@ -60,11 +63,8 @@ impl Default for Config {
             runtime_dir: PathBuf::from(".edge-lm-server"),
             host: "127.0.0.1".to_string(),
             port: 8000,
-            model: "TheStageAI/gemma-4-E4B-it".to_string(),
-            pi_models: vec![
-                "TheStageAI/gemma-4-E4B-it".to_string(),
-                "TheStageAI/gemma-4-E2B-it".to_string(),
-            ],
+            model: DEFAULT_MODEL.to_string(),
+            pi_models: vec![DEFAULT_MODEL.to_string(), SMALLER_MODEL.to_string()],
             models_dir: PathBuf::from(DEFAULT_MODELS_DIR),
             size: "m".to_string(),
             context_tokens: 128_000,
@@ -85,7 +85,7 @@ fn main() {
 }
 
 fn real_main() -> Result<(), String> {
-    let config = parse_args(env::args().skip(1).collect())?;
+    let mut config = parse_args(env::args().skip(1).collect())?;
 
     if config.action == Action::Help {
         print_help();
@@ -97,6 +97,10 @@ fn real_main() -> Result<(), String> {
     if config.action == Action::Clean {
         clean_runtime(&runtime_dir)?;
         return Ok(());
+    }
+
+    if config.action == Action::Menu {
+        configure_from_menu(&mut config)?;
     }
 
     restore_split_vendored_models(&config)?;
@@ -135,6 +139,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
     while i < args.len() {
         match args[i].as_str() {
             "run" => config.action = Action::Run,
+            "menu" => config.action = Action::Menu,
             "setup" => config.action = Action::Setup,
             "clean" => config.action = Action::Clean,
             "-h" | "--help" | "help" => config.action = Action::Help,
@@ -201,11 +206,94 @@ fn value_after(args: &[String], index: usize, flag: &str) -> Result<String, Stri
         .ok_or_else(|| format!("{flag} needs a value"))
 }
 
+fn configure_from_menu(config: &mut Config) -> Result<(), String> {
+    println!("edge-lm-server setup");
+    println!();
+    println!("Choose model source:");
+    println!("  1) Remote source (recommended first run, no Git LFS)");
+    println!("  2) Vendored GitHub LFS files (offline-safe, downloads selected files)");
+    let source = prompt_choice("Model source", &["1", "2"], "1")?;
+
+    config.prefer_remote = source == "1";
+
+    if config.prefer_remote {
+        println!();
+        println!("Choose model:");
+        println!("  1) TheStageAI/gemma-4-E4B-it (default)");
+        println!("  2) TheStageAI/gemma-4-E2B-it (smaller)");
+        let model = prompt_choice("Model", &["1", "2"], "1")?;
+        config.model = if model == "2" {
+            SMALLER_MODEL.to_string()
+        } else {
+            DEFAULT_MODEL.to_string()
+        };
+    } else {
+        println!();
+        println!("Vendored files are currently available for:");
+        println!("  1) TheStageAI/gemma-4-E4B-it (default)");
+        println!("  2) TheStageAI/gemma-4-E2B-it (smaller)");
+        let model = prompt_choice("Model", &["1", "2"], "1")?;
+        config.model = if model == "2" {
+            SMALLER_MODEL.to_string()
+        } else {
+            DEFAULT_MODEL.to_string()
+        };
+    }
+
+    println!();
+    println!("Choose model size:");
+    println!("  1) m (default, smaller)");
+    println!("  2) l (larger, needs more memory)");
+    let size = prompt_choice("Size", &["1", "2"], "1")?;
+    config.size = if size == "2" { "l" } else { "m" }.to_string();
+    config.pi_models = vec![config.model.clone()];
+
+    if !config.prefer_remote {
+        ensure_vendored_model_files(config)?;
+    }
+
+    println!();
+    println!(
+        "Starting {} with size {} from {}.",
+        config.model,
+        config.size,
+        if config.prefer_remote {
+            "remote source"
+        } else {
+            "vendored GitHub LFS files"
+        }
+    );
+    println!();
+
+    Ok(())
+}
+
+fn prompt_choice(prompt: &str, allowed: &[&str], default: &str) -> Result<String, String> {
+    loop {
+        print!("{prompt} [{default}]: ");
+        io::stdout()
+            .flush()
+            .map_err(|e| format!("failed to flush stdout: {e}"))?;
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| format!("failed to read stdin: {e}"))?;
+        let value = input.trim();
+        let value = if value.is_empty() { default } else { value };
+        if allowed.contains(&value) {
+            return Ok(value.to_string());
+        }
+        println!("Please choose one of: {}", allowed.join(", "));
+    }
+}
+
 fn print_help() {
     println!(
         "edge-lm-server\n\n\
          Usage:\n\
            edge-lm-server [run] [options]\n\
+           edge-lm-server menu [options]\n\
            edge-lm-server setup [options]\n\
            edge-lm-server clean [--runtime-dir DIR]\n\n\
          Options:\n\
@@ -463,6 +551,113 @@ print(f'vendored {repo_id} into {local_dir}')\n";
     )
 }
 
+fn ensure_vendored_model_files(config: &Config) -> Result<(), String> {
+    if vendored_model_ready(config)? {
+        println!(
+            "Found local vendored model files for size {}; skipping Git LFS pull.",
+            config.size
+        );
+        return Ok(());
+    }
+
+    if !run_quiet(Command::new("git").arg("lfs").arg("version")) {
+        return Err(
+            "Vendored model files require Git LFS. Install it with `brew install git-lfs`, then rerun `./run`."
+                .to_string(),
+        );
+    }
+
+    let include = vendored_lfs_include_paths(config).join(",");
+    println!("Downloading selected vendored files with Git LFS...");
+    println!("size: {}", config.size);
+    run_inherit(
+        Command::new("git")
+            .arg("lfs")
+            .arg("pull")
+            .arg("--include")
+            .arg(include)
+            .arg("--exclude")
+            .arg(""),
+    )?;
+
+    if vendored_model_ready(config)? {
+        Ok(())
+    } else {
+        Err("Git LFS finished, but selected vendored model files are still incomplete".to_string())
+    }
+}
+
+fn vendored_lfs_include_paths(config: &Config) -> Vec<String> {
+    let Some((org, repo)) = config.model.split_once('/') else {
+        return Vec::new();
+    };
+    let base = format!("{DEFAULT_MODELS_DIR}/{org}/{repo}");
+    let mut paths = vec![
+        format!("{base}/audio_tower.safetensors"),
+        format!("{base}/vision_tower.safetensors"),
+        format!("{base}/tokenizer.json"),
+        format!("{base}/ple_{}.safetensors", config.size),
+    ];
+
+    if config.model == DEFAULT_MODEL {
+        paths.extend([
+            format!("{base}/model_{}.safetensors.part00", config.size),
+            format!("{base}/model_{}.safetensors.part01", config.size),
+        ]);
+    } else {
+        paths.push(format!("{base}/model_{}.safetensors", config.size));
+    }
+
+    paths
+}
+
+fn vendored_model_ready(config: &Config) -> Result<bool, String> {
+    let vendored = vendored_model_path(config)?;
+    if !vendored.exists() {
+        return Ok(false);
+    }
+
+    let model = vendored.join(format!("model_{}.safetensors", config.size));
+    let model_parts = [
+        vendored.join(format!("model_{}.safetensors.part00", config.size)),
+        vendored.join(format!("model_{}.safetensors.part01", config.size)),
+    ];
+    let model_ready = real_file_at_least(&model, 100 * 1024 * 1024)
+        || model_parts
+            .iter()
+            .all(|path| real_file_at_least(path, 100 * 1024 * 1024));
+
+    Ok(model_ready
+        && real_file_at_least(
+            &vendored.join(format!("ple_{}.safetensors", config.size)),
+            100 * 1024 * 1024,
+        )
+        && real_file_at_least(&vendored.join("audio_tower.safetensors"), 100 * 1024 * 1024)
+        && real_file_at_least(
+            &vendored.join("vision_tower.safetensors"),
+            100 * 1024 * 1024,
+        )
+        && real_file_at_least(&vendored.join("tokenizer.json"), 1024 * 1024))
+}
+
+fn real_file_at_least(path: &Path, min_bytes: u64) -> bool {
+    path.metadata()
+        .map(|metadata| metadata.len() >= min_bytes && !is_lfs_pointer(path))
+        .unwrap_or(false)
+}
+
+fn is_lfs_pointer(path: &Path) -> bool {
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    let mut buffer = [0; 128];
+    let Ok(size) = file.read(&mut buffer) else {
+        return false;
+    };
+    String::from_utf8_lossy(&buffer[..size])
+        .starts_with("version https://git-lfs.github.com/spec/v1")
+}
+
 fn restore_split_vendored_models(config: &Config) -> Result<(), String> {
     if config.prefer_remote || model_looks_like_path(&config.model) {
         return Ok(());
@@ -473,6 +668,7 @@ fn restore_split_vendored_models(config: &Config) -> Result<(), String> {
         return Ok(());
     }
 
+    let expected_model_file = format!("model_{}.safetensors", config.size);
     let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
     let entries = fs::read_dir(&vendored)
         .map_err(|e| format!("failed to read {}: {e}", vendored.display()))?;
@@ -490,6 +686,9 @@ fn restore_split_vendored_models(config: &Config) -> Result<(), String> {
         let Some(base_name) = split_part_base_name(file_name) else {
             continue;
         };
+        if base_name != expected_model_file || is_lfs_pointer(&path) {
+            continue;
+        }
         groups
             .entry(vendored.join(base_name))
             .or_default()
@@ -617,7 +816,7 @@ fn model_source(config: &Config) -> Result<PathBuf, String> {
     }
 
     let vendored = vendored_model_path(config)?;
-    if vendored.exists() {
+    if vendored_model_ready(config)? {
         return Ok(vendored);
     }
 

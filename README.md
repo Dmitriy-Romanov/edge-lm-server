@@ -10,45 +10,69 @@ server, and exposes it at:
 http://127.0.0.1:8000/v1
 ```
 
-This repository includes vendored model files through Git LFS, so the default
-model can still run even if the upstream model later disappears.
-
 ## Requirements
 
 - macOS on Apple silicon
 - Rust/Cargo
 - Python 3.10 or newer
-- Git LFS, only if you want to use the vendored model files
+- Git LFS, only if you choose the vendored GitHub model option
 
 ## Quick start
 
-Use the remote model source:
+Clone only the code first. This avoids downloading large Git LFS model files
+during `git clone`:
 
 ```bash
-git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git
 cd edge-lm-server
-cargo build --release
-./target/release/edge-lm-server --prefer-remote
+./run
 ```
 
-On first run, the launcher creates `.edge-lm-server`, installs the Python
-dependencies, downloads the model from the remote source, and starts the
-gateway.
+`./run` builds the launcher and opens a small menu. The menu asks:
 
-Advanced: use the vendored model files from this repository so the default
-model can still run if the upstream model disappears:
+- where to load the model from: remote source or vendored GitHub LFS files
+- which model to run
+- which size to run
 
-```bash
-git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git
-cd edge-lm-server
-git lfs install
-git lfs pull
-cargo build --release
-./target/release/edge-lm-server
-```
+The remote option is the simplest first run. It does not require Git LFS, but it
+does depend on the upstream model still being available.
 
-With the vendored path, the launcher reassembles split model files if needed
-before starting the gateway.
+The vendored GitHub option is the offline-safe path. It requires Git LFS, but it
+downloads only the selected model and size instead of pulling every model file
+in the repository.
+
+## Models
+
+The menu currently supports these remote model ids:
+
+- `TheStageAI/gemma-4-E4B-it`
+- `TheStageAI/gemma-4-E2B-it`
+
+Remote size availability depends on what the upstream model repository provides.
+
+This repository currently vendors both model ids:
+
+- `TheStageAI/gemma-4-E4B-it`
+- `TheStageAI/gemma-4-E2B-it`
+
+For each vendored model, the launcher can use:
+
+- `m`, the default size
+- `l`, the larger size
+
+For E4B, the selected size uses roughly:
+
+- `m`: about 2.6 GB of model files
+- `l`: about 3.1 GB of model files
+
+For E2B, the selected size uses roughly:
+
+- `m`: about 1.4 GB of model files
+- `l`: about 1.7 GB of model files
+
+Some shared files are also needed, such as the tokenizer, audio tower, and
+vision tower. If those files are already present locally, the launcher skips the
+Git LFS download on later runs.
 
 ## Pi Agent config
 
@@ -71,23 +95,17 @@ Add this provider to `~/.pi/agent/models.json`:
         "contextWindow": 128000,
         "maxTokens": 16000,
         "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+      },
+      {
+        "id": "TheStageAI/gemma-4-E2B-it",
+        "contextWindow": 128000,
+        "maxTokens": 16000,
+        "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
       }
     ]
   }
 }
 ```
-
-## Useful commands
-
-```bash
-./target/release/edge-lm-server --port 8001
-./target/release/edge-lm-server --context 128000
-./target/release/edge-lm-server --prefer-remote
-./target/release/edge-lm-server clean
-```
-
-`--prefer-remote` ignores the vendored model and asks Edge-LM to load the model
-from its remote source. This is useful when testing a newer upstream model.
 
 ## Notes
 
