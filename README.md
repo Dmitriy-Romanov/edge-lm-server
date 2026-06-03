@@ -18,9 +18,11 @@ model can still run even if the upstream model later disappears.
 - macOS on Apple silicon
 - Rust/Cargo
 - Python 3.10 or newer
-- Git LFS
+- Git LFS, only if you want to use the vendored model files
 
 ## Quick start
+
+Use the vendored model from this repository:
 
 ```bash
 git lfs install
@@ -31,6 +33,16 @@ cargo build --release
 
 On first run, the launcher creates `.edge-lm-server`, installs the Python
 dependencies, reassembles split model files if needed, and starts the gateway.
+
+Or skip Git LFS and load the model from the remote source instead:
+
+```bash
+cargo build --release
+./target/release/edge-lm-server --prefer-remote
+```
+
+This does not download the vendored model files from the repository, but it does
+depend on the upstream model still being available.
 
 ## Pi Agent config
 
