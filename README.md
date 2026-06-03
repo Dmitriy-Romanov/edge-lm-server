@@ -52,6 +52,15 @@ Useful flags:
 Cleanup is simple: remove the binary and the runtime directory. The `clean`
 command removes the runtime directory for you.
 
+## License and model terms
+
+This launcher is MIT licensed. It installs and uses
+[TheStageAI/edge-lm](https://github.com/TheStageAI/edge-lm), which is also MIT
+licensed. The Edge-LM model weights are derivatives of Google's Gemma models and
+are additionally subject to the Gemma Terms of Use.
+
+See [NOTICE.md](NOTICE.md) for attribution details.
+
 The launcher prints a ready-to-paste provider block for
 `~/.pi/agent/models.json`:
 
