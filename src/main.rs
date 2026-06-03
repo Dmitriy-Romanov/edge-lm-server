@@ -153,9 +153,9 @@ fn real_main() -> Result<(), String> {
     if config.preload_model {
         preload_model(&venv_python, &runtime_dir, &config)?;
     }
-    print_pi_config(&config);
 
     if config.action == Action::Setup {
+        print_pi_config(&config);
         println!("setup complete: {}", runtime_dir.display());
         return Ok(());
     }
@@ -260,14 +260,16 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
     println!();
     println!("Choose what to do:");
     let action = if downloaded.is_empty() {
-        println!("  1) Download selected model from GitHub LFS (offline-safe)");
-        println!("  2) Use remote source (no Git LFS, downloads from upstream)");
-        prompt_choice("Action", &["1", "2"], "2")?
-    } else {
-        println!("  1) Start server with downloaded model");
+        println!("  1) Show Pi Agent instructions");
         println!("  2) Download selected model from GitHub LFS (offline-safe)");
         println!("  3) Use remote source (no Git LFS, downloads from upstream)");
-        prompt_choice("Action", &["1", "2", "3"], "1")?
+        prompt_choice("Action", &["1", "2", "3"], "3")?
+    } else {
+        println!("  1) Start server with downloaded model");
+        println!("  2) Show Pi Agent instructions");
+        println!("  3) Download selected model from GitHub LFS (offline-safe)");
+        println!("  4) Use remote source (no Git LFS, downloads from upstream)");
+        prompt_choice("Action", &["1", "2", "3", "4"], "1")?
     };
 
     if action == "1" && !downloaded.is_empty() {
@@ -276,6 +278,11 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
         config.size = selected.size;
         config.prefer_remote = false;
     } else if (downloaded.is_empty() && action == "1") || (!downloaded.is_empty() && action == "2")
+    {
+        configure_pi_instructions_from_menu(config)?;
+        print_pi_config(config);
+        std::process::exit(0);
+    } else if (downloaded.is_empty() && action == "2") || (!downloaded.is_empty() && action == "3")
     {
         config.prefer_remote = false;
         choose_model_and_size(config, true)?;
@@ -385,6 +392,32 @@ fn choose_model_and_size(config: &mut Config, show_download_sizes: bool) -> Resu
     let size = prompt_choice("Size", &["1", "2"], "1")?;
     config.size = if size == "2" { "l" } else { "m" }.to_string();
 
+    Ok(())
+}
+
+fn configure_pi_instructions_from_menu(config: &mut Config) -> Result<(), String> {
+    println!();
+    println!("Choose model to show in Pi Agent config:");
+    for (index, option) in MODEL_OPTIONS.iter().enumerate() {
+        println!(
+            "  {}) {} ({}, {})",
+            index + 1,
+            option.id,
+            option.name,
+            option.description
+        );
+    }
+    println!("  3) Both models");
+
+    let choice = prompt_choice("Pi Agent model", &["1", "2", "3"], "3")?;
+    config.pi_models = match choice.as_str() {
+        "1" => vec![DEFAULT_MODEL.to_string()],
+        "2" => vec![SMALLER_MODEL.to_string()],
+        _ => MODEL_OPTIONS
+            .iter()
+            .map(|option| option.id.to_string())
+            .collect(),
+    };
     Ok(())
 }
 
@@ -1011,6 +1044,16 @@ fn model_looks_like_path(value: &str) -> bool {
 }
 
 fn print_pi_config(config: &Config) {
+    println!();
+    println!("Repository:");
+    println!("https://github.com/Dmitriy-Romanov/edge-lm-server");
+    println!();
+    println!("Quick start:");
+    println!(
+        "GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git"
+    );
+    println!("cd edge-lm-server");
+    println!("./run");
     println!();
     println!("Add this provider to ~/.pi/agent/models.json:");
     println!();

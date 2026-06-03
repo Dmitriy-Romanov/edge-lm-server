@@ -31,6 +31,7 @@ cd edge-lm-server
 `./run` builds the launcher and opens a small menu. The menu asks:
 
 - whether to start an already downloaded vendored model, if one is present
+- whether to show Pi Agent setup instructions
 - where to load the model from: remote source or vendored GitHub LFS files
 - which model to run
 - which size to run

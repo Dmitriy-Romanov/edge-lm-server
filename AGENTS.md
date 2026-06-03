@@ -75,6 +75,10 @@ This prevents an installed Git LFS smudge filter from downloading every model
 file during clone. The menu can then selectively download only the selected
 vendored size.
 
+The menu has a dedicated "Show Pi Agent instructions" action. Normal server
+startup should not print the provider JSON every time; keep that output in the
+instructions action or explicit setup flows.
+
 ## Split model files
 
 GitHub LFS rejects individual files over 2 GiB on free accounts. For E4B, the
