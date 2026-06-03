@@ -22,27 +22,33 @@ model can still run even if the upstream model later disappears.
 
 ## Quick start
 
-Use the vendored model from this repository:
+Use the remote model source:
 
 ```bash
+git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git
+cd edge-lm-server
+cargo build --release
+./target/release/edge-lm-server --prefer-remote
+```
+
+On first run, the launcher creates `.edge-lm-server`, installs the Python
+dependencies, downloads the model from the remote source, and starts the
+gateway.
+
+Advanced: use the vendored model files from this repository so the default
+model can still run if the upstream model disappears:
+
+```bash
+git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git
+cd edge-lm-server
 git lfs install
 git lfs pull
 cargo build --release
 ./target/release/edge-lm-server
 ```
 
-On first run, the launcher creates `.edge-lm-server`, installs the Python
-dependencies, reassembles split model files if needed, and starts the gateway.
-
-Or skip Git LFS and load the model from the remote source instead:
-
-```bash
-cargo build --release
-./target/release/edge-lm-server --prefer-remote
-```
-
-This does not download the vendored model files from the repository, but it does
-depend on the upstream model still being available.
+With the vendored path, the launcher reassembles split model files if needed
+before starting the gateway.
 
 ## Pi Agent config
 
