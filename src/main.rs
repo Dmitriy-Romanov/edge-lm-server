@@ -18,14 +18,12 @@ const MODEL_OPTIONS: &[ModelOption] = &[
         name: "E4B",
         description: "larger QAT model",
         size_m_download: "about 3.1 GB",
-        size_l_download: "about 3.7 GB",
     },
     ModelOption {
         id: SMALLER_MODEL,
         name: "E2B",
         description: "smaller QAT model",
         size_m_download: "about 1.8 GB",
-        size_l_download: "about 2.1 GB",
     },
 ];
 const PYTHON_CANDIDATES: &[&str] = &[
@@ -78,7 +76,6 @@ struct ModelOption {
     name: &'static str,
     description: &'static str,
     size_m_download: &'static str,
-    size_l_download: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -413,17 +410,15 @@ fn configure_pi_instructions_from_menu(config: &mut Config) -> Result<(), String
 fn downloaded_local_models(config: &Config) -> Result<Vec<DownloadedModel>, String> {
     let mut downloaded = Vec::new();
     for option in MODEL_OPTIONS {
-        for size in ["m", "l"] {
-            let mut candidate = config.clone();
-            candidate.model = option.id.to_string();
-            candidate.size = size.to_string();
-            candidate.prefer_remote = false;
-            if local_model_ready(&candidate)? {
-                downloaded.push(DownloadedModel {
-                    model: candidate.model,
-                    size: candidate.size,
-                });
-            }
+        let mut candidate = config.clone();
+        candidate.model = option.id.to_string();
+        candidate.size = "m".to_string();
+        candidate.prefer_remote = false;
+        if local_model_ready(&candidate)? {
+            downloaded.push(DownloadedModel {
+                model: candidate.model,
+                size: candidate.size,
+            });
         }
     }
     Ok(downloaded)
@@ -451,7 +446,7 @@ fn model_size_download_label(model: &str, size: &str) -> &'static str {
         return "unknown size";
     };
     if size == "l" {
-        option.size_l_download
+        "advanced size l"
     } else {
         option.size_m_download
     }
