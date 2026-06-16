@@ -15,70 +15,72 @@ http://127.0.0.1:8000/v1
 - macOS on Apple silicon
 - Rust/Cargo
 - Python 3.10 or newer
-- Git LFS, only if you choose the vendored GitHub model option
 
 ## Quick start
 
-Clone only the code first. This avoids downloading large Git LFS model files
-during `git clone`:
+Clone the project and run the menu:
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git
+git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git
 cd edge-lm-server
 ./run
 ```
 
 `./run` builds the launcher and opens a small menu. The menu asks:
 
-- whether to start an already downloaded vendored model, if one is present
+- whether to start existing local model files, if they are present
 - whether to show Pi Agent setup instructions
-- where to load the model from: remote source or vendored GitHub LFS files
+- whether to pre-download/cache a model from Hugging Face or let Edge-LM fetch
+  it on first run
 - which model to run
 - which size to run
 
-The remote option is the simplest first run. It does not require Git LFS, but it
-does depend on the upstream model still being available.
+Model files are downloaded from the upstream TheStageAI repositories on Hugging
+Face. This repository intentionally does not distribute model weights through
+GitHub LFS, because public LFS bandwidth can be exhausted and break installs.
 
-The vendored GitHub option is the offline-safe path. It requires Git LFS, but it
-downloads only the selected model and size instead of pulling every model file
-in the repository.
+The download/cache menu option fetches the selected model into
+`.edge-lm-server/hf-home` and then starts the server in Hugging Face offline
+mode. The remote option is simpler and lets Edge-LM download files as needed
+during startup.
 
-When you start an already downloaded vendored model, the launcher runs it in
-Hugging Face offline mode so missing local files do not trigger surprise network
-downloads.
+If you already ran this project before and want to refresh the upstream
+`TheStageAI/edge-lm` Python package, run:
+
+```bash
+./run --reinstall
+```
 
 ## Models
 
-The menu currently supports these remote model ids:
+The menu currently supports the upstream QAT model ids:
 
-- `TheStageAI/gemma-4-E4B-it`
-- `TheStageAI/gemma-4-E2B-it`
+- `TheStageAI/gemma-4-E4B-it-qat`
+- `TheStageAI/gemma-4-E2B-it-qat`
 
-Remote size availability depends on what the upstream model repository provides.
+These repositories also advertise GGUF files upstream, but this gateway uses
+the native Edge-LM / MLX checkpoint path, not llama.cpp. GGUF support would be a
+separate backend.
 
-This repository currently vendors both model ids:
-
-- `TheStageAI/gemma-4-E4B-it`
-- `TheStageAI/gemma-4-E2B-it`
-
-For each vendored model, the launcher can use:
+For each model, the launcher can use:
 
 - `m`, the default size
 - `l`, the larger size
 
-For E4B, the selected size uses roughly:
+Approximate model file sizes:
 
-- `m`: about 2.6 GB of model files
-- `l`: about 3.1 GB of model files
+For E4B:
 
-For E2B, the selected size uses roughly:
+- `m`: about 2.3 GB for the main model file, about 3.1 GB total
+- `l`: about 2.8 GB for the main model file, about 3.7 GB total
 
-- `m`: about 1.4 GB of model files
-- `l`: about 1.7 GB of model files
+For E2B:
+
+- `m`: about 1.1 GB for the main model file, about 1.8 GB total
+- `l`: about 1.4 GB for the main model file, about 2.1 GB total
 
 Some shared files are also needed, such as the tokenizer, audio tower, and
-vision tower. If those files are already present locally, the launcher skips the
-Git LFS download on later runs.
+vision tower.
 
 ## Pi Agent config
 
@@ -97,13 +99,13 @@ Add this provider to `~/.pi/agent/models.json`:
     },
     "models": [
       {
-        "id": "TheStageAI/gemma-4-E4B-it",
+        "id": "TheStageAI/gemma-4-E4B-it-qat",
         "contextWindow": 128000,
         "maxTokens": 16000,
         "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
       },
       {
-        "id": "TheStageAI/gemma-4-E2B-it",
+        "id": "TheStageAI/gemma-4-E2B-it-qat",
         "contextWindow": 128000,
         "maxTokens": 16000,
         "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }

@@ -31,27 +31,32 @@ The Python server:
 This project targets Apple silicon macOS. The inference path depends on MLX, so
 a normal Linux Docker image is not a reliable runtime for this implementation.
 
-## Vendored model strategy
+## Model distribution strategy
+
+Do not commit model weights to this repository.
+
+GitHub LFS was removed as the model distribution path because public LFS
+bandwidth can be exhausted and then installs fail for users. The GitHub
+repository should contain code and docs only. Model files should come from the
+upstream TheStageAI repositories on Hugging Face.
 
 The default model is:
 
 ```bash
-TheStageAI/gemma-4-E4B-it
+TheStageAI/gemma-4-E4B-it-qat
 ```
 
-The repository currently vendors:
+The smaller model is:
 
 ```bash
-models/TheStageAI/gemma-4-E4B-it
-models/TheStageAI/gemma-4-E2B-it
+TheStageAI/gemma-4-E2B-it-qat
 ```
 
-If that directory exists and `--prefer-remote` is not set, the launcher passes
-the local path as `EDGE_LM_MODEL_SOURCE`. It still passes the public model id as
-`EDGE_LM_MODEL_ID`, so Pi Agent sees the normal model id.
-
-If `--prefer-remote` is set, vendored files are ignored and the model id is used
-directly as the load source.
+Only QAT models are exposed in the normal menu. The previous non-QAT models can
+still be used manually with `--model`, but they are not the default user path.
+TheStageAI also publishes GGUF artifacts for llama.cpp-compatible runtimes, but
+this gateway currently uses native Edge-LM / MLX safetensors checkpoints. Do not
+add GGUF to the normal menu unless a llama.cpp backend is implemented.
 
 The user-facing entry point is:
 
@@ -65,124 +70,19 @@ That script builds the release binary and runs:
 ./target/release/edge-lm-server menu
 ```
 
-The README intentionally recommends:
-
-```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone ...
-```
-
-This prevents an installed Git LFS smudge filter from downloading every model
-file during clone. The menu can then selectively download only the selected
-vendored size.
-
 The menu has a dedicated "Show Pi Agent instructions" action. Normal server
 startup should not print the provider JSON every time; keep that output in the
 instructions action or explicit setup flows.
 
-## Split model files
+The menu supports two Hugging Face paths:
 
-GitHub LFS rejects individual files over 2 GiB on free accounts. For E4B, the
-full `model_l.safetensors` and `model_m.safetensors` files are therefore not
-tracked directly. They are stored as LFS chunks:
+- remote startup, where Edge-LM downloads model files as needed
+- preload/cache, where the launcher first calls `load(...)` to populate
+  `.edge-lm-server/hf-home`, then starts the server in Hugging Face offline mode
 
-```bash
-models/TheStageAI/gemma-4-E4B-it/model_l.safetensors.part00
-models/TheStageAI/gemma-4-E4B-it/model_l.safetensors.part01
-models/TheStageAI/gemma-4-E4B-it/model_m.safetensors.part00
-models/TheStageAI/gemma-4-E4B-it/model_m.safetensors.part01
-```
-
-On startup, `src/main.rs` calls `restore_split_vendored_models`. If the target
-`.safetensors` file is missing and matching `.partNN` files exist, the launcher
-reassembles the file before starting Python.
-
-The restored full files are ignored by git:
-
-```bash
-models/TheStageAI/gemma-4-E4B-it/model_*.safetensors
-```
-
-E2B model files are below the GitHub LFS per-object limit, so
-`model_m.safetensors` and `model_l.safetensors` are tracked directly through
-Git LFS.
-
-The interactive menu uses `git lfs pull --include ... --exclude ""` to download
-only the files needed for the selected model and size. For E4B `m`, it includes:
-
-- shared `config.json`
-- shared `audio_tower.safetensors`
-- shared `vision_tower.safetensors`
-- shared `tokenizer.json`
-- shared `tokenizer_config.json`
-- shared `chat_template.jinja`
-- `ple_m.safetensors`
-- `model_m.safetensors.part00`
-- `model_m.safetensors.part01`
-
-For E4B `l`, it swaps the `m` files for `ple_l` and `model_l` parts. For E2B,
-it pulls the full `model_m.safetensors` or `model_l.safetensors` file instead
-of split parts.
-
-The launcher checks whether selected files are already present and real LFS
-content, not pointer files, before pulling. This protects repeat runs from
-re-downloading the same model files.
-
-Vendored runs automatically set `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`.
-This is intentional: starting a downloaded model must not silently fetch missing
-tokenizer/template files from Hugging Face. If a vendored model is incomplete,
-the launcher should fail or pull the selected files explicitly through the menu.
-
-## Updating vendored models
-
-Use this only when intentionally refreshing model files in the repository.
-
-Install Git LFS:
-
-```bash
-brew install git-lfs
-git lfs install
-```
-
-Download the default model into `models/`:
-
-```bash
-cargo build --release
-./target/release/edge-lm-server setup --vendor-model
-```
-
-Download another model:
-
-```bash
-./target/release/edge-lm-server setup \
-  --model TheStageAI/gemma-4-E2B-it \
-  --size m \
-  --vendor-model
-```
-
-If any generated model file is larger than GitHub LFS allows, split it before
-committing:
-
-```bash
-split -b 1900m -d -a 2 \
-  models/TheStageAI/gemma-4-E4B-it/model_m.safetensors \
-  models/TheStageAI/gemma-4-E4B-it/model_m.safetensors.part
-```
-
-Repeat for other files over the limit. Keep the original full file locally, but
-remove it from the git index:
-
-```bash
-git rm --cached models/TheStageAI/gemma-4-E4B-it/model_m.safetensors
-```
-
-Then add the chunks and metadata:
-
-```bash
-git add .gitattributes .gitignore models/
-git commit -m "Vendor split Edge-LM model weights"
-git lfs push origin main
-git push origin main
-```
+The `models/` directory is ignored by git. It is only a local/legacy model file
+location. Existing local model files can still be detected and started, but new
+users should not rely on this path.
 
 ## Useful launcher flags
 
@@ -197,7 +97,6 @@ git push origin main
 --context TOKENS
 --reinstall
 --preload-model
---vendor-model
 --offline
 --prefer-remote
 ```
@@ -207,8 +106,35 @@ git push origin main
 `--offline` sets `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` for the Python
 server process.
 
-`--vendor-model` downloads model files into `models/`; use it as a maintainer
-operation, not as a normal user workflow.
+`--prefer-remote` tells the launcher to use the Hugging Face model id directly
+even if local model files exist under `models/`.
+
+Use `--reinstall` when upstream `TheStageAI/edge-lm` changed and the local venv
+should be refreshed.
+
+## Upstream sync notes
+
+Before changing model ids or sizes, check upstream metadata without downloading
+weights:
+
+```bash
+.edge-lm-server/.venv/bin/python - <<'PY'
+from huggingface_hub import HfApi
+
+for repo in [
+    "TheStageAI/gemma-4-E4B-it-qat",
+    "TheStageAI/gemma-4-E2B-it-qat",
+]:
+    info = HfApi().model_info(repo, files_metadata=True)
+    print(repo, info.sha, info.last_modified)
+    for sibling in info.siblings:
+        if sibling.rfilename.endswith((".safetensors", ".json", ".jinja")):
+            print(" ", sibling.rfilename, sibling.size)
+PY
+```
+
+If the upstream package behavior changes, prefer a launcher/docs update over
+vendoring weights.
 
 ## Verification
 
@@ -220,14 +146,15 @@ cargo check
 cargo run -- --help
 ```
 
-For model packaging changes, also verify:
+For packaging changes, also verify:
 
 ```bash
-git lfs ls-files --size
 git status --short --branch
+git lfs ls-files --size
 ```
 
-No reachable LFS object should exceed GitHub's per-object size limit.
+`git lfs ls-files --size` should be empty after removing model weights from the
+repository.
 
 ## License and terms
 

@@ -10,22 +10,22 @@ use std::process::{Command, ExitStatus, Stdio};
 const EDGE_LM_REPO: &str = "git+https://github.com/TheStageAI/edge-lm.git";
 const SERVER_PY: &str = include_str!("server.py");
 const DEFAULT_MODELS_DIR: &str = "models";
-const DEFAULT_MODEL: &str = "TheStageAI/gemma-4-E4B-it";
-const SMALLER_MODEL: &str = "TheStageAI/gemma-4-E2B-it";
+const DEFAULT_MODEL: &str = "TheStageAI/gemma-4-E4B-it-qat";
+const SMALLER_MODEL: &str = "TheStageAI/gemma-4-E2B-it-qat";
 const MODEL_OPTIONS: &[ModelOption] = &[
     ModelOption {
         id: DEFAULT_MODEL,
         name: "E4B",
-        description: "best vendored quality",
-        size_m_download: "model 2.3 GB, total about 2.9 GB",
-        size_l_download: "model 2.8 GB, total about 3.4 GB",
+        description: "QAT, higher quality",
+        size_m_download: "model 2.3 GB, total about 3.1 GB",
+        size_l_download: "model 2.8 GB, total about 3.7 GB",
     },
     ModelOption {
         id: SMALLER_MODEL,
         name: "E2B",
-        description: "smaller and faster",
-        size_m_download: "model 1.1 GB, total about 1.9 GB",
-        size_l_download: "model 1.4 GB, total about 2.2 GB",
+        description: "QAT, smaller and faster",
+        size_m_download: "model 1.1 GB, total about 1.8 GB",
+        size_l_download: "model 1.4 GB, total about 2.1 GB",
     },
 ];
 const PYTHON_CANDIDATES: &[&str] = &[
@@ -67,7 +67,6 @@ struct Config {
     context_tokens: usize,
     reinstall: bool,
     preload_model: bool,
-    vendor_model: bool,
     offline: bool,
     prefer_remote: bool,
 }
@@ -101,7 +100,6 @@ impl Default for Config {
             context_tokens: 128_000,
             reinstall: false,
             preload_model: false,
-            vendor_model: false,
             offline: false,
             prefer_remote: false,
         }
@@ -134,7 +132,7 @@ fn real_main() -> Result<(), String> {
         configure_from_menu(&mut config)?;
     }
 
-    restore_split_vendored_models(&config)?;
+    restore_split_local_models(&config)?;
 
     fs::create_dir_all(&runtime_dir)
         .map_err(|e| format!("failed to create {}: {e}", runtime_dir.display()))?;
@@ -147,9 +145,6 @@ fn real_main() -> Result<(), String> {
     ensure_pip(&venv_python)?;
     install_dependencies(&venv_python, &git, &runtime_dir, config.reinstall)?;
     write_server(&runtime_dir)?;
-    if config.vendor_model {
-        vendor_model(&venv_python, &config)?;
-    }
     if config.preload_model {
         preload_model(&venv_python, &runtime_dir, &config)?;
     }
@@ -220,7 +215,6 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
             }
             "--reinstall" => config.reinstall = true,
             "--preload-model" => config.preload_model = true,
-            "--vendor-model" => config.vendor_model = true,
             "--offline" => config.offline = true,
             "--prefer-remote" => config.prefer_remote = true,
             other => return Err(format!("unknown argument: {other}")),
@@ -241,11 +235,11 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
     println!("edge-lm-server setup");
     println!();
 
-    let downloaded = downloaded_vendored_models(config)?;
+    let downloaded = downloaded_local_models(config)?;
     if downloaded.is_empty() {
-        println!("Downloaded vendored models: none");
+        println!("Local model files: none");
     } else {
-        println!("Downloaded vendored models:");
+        println!("Local model files:");
         for (index, item) in downloaded.iter().enumerate() {
             println!(
                 "  {}) {} size {} ({})",
@@ -261,14 +255,14 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
     println!("Choose what to do:");
     let action = if downloaded.is_empty() {
         println!("  1) Show Pi Agent instructions");
-        println!("  2) Download selected model from GitHub LFS (offline-safe)");
-        println!("  3) Use remote source (no Git LFS, downloads from upstream)");
+        println!("  2) Download/cache selected model from Hugging Face");
+        println!("  3) Use remote source (downloads from Hugging Face on first run)");
         prompt_choice("Action", &["1", "2", "3"], "3")?
     } else {
-        println!("  1) Start server with downloaded model");
+        println!("  1) Start server with local model files");
         println!("  2) Show Pi Agent instructions");
-        println!("  3) Download selected model from GitHub LFS (offline-safe)");
-        println!("  4) Use remote source (no Git LFS, downloads from upstream)");
+        println!("  3) Download/cache selected model from Hugging Face");
+        println!("  4) Use remote source (downloads from Hugging Face on first run)");
         prompt_choice("Action", &["1", "2", "3", "4"], "1")?
     };
 
@@ -284,9 +278,10 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
         std::process::exit(0);
     } else if (downloaded.is_empty() && action == "2") || (!downloaded.is_empty() && action == "3")
     {
-        config.prefer_remote = false;
+        config.prefer_remote = true;
+        config.preload_model = true;
+        config.offline = true;
         choose_model_and_size(config, true)?;
-        ensure_vendored_model_files(config)?;
     } else {
         config.prefer_remote = true;
         choose_model_and_size(config, false)?;
@@ -300,9 +295,13 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
         config.model,
         config.size,
         if config.prefer_remote {
-            "remote source"
+            if config.preload_model {
+                "Hugging Face cache"
+            } else {
+                "Hugging Face remote source"
+            }
         } else {
-            "vendored GitHub LFS files"
+            "local model files"
         }
     );
     println!();
@@ -314,7 +313,7 @@ fn choose_downloaded_model(downloaded: &[DownloadedModel]) -> Result<DownloadedM
     if downloaded.len() == 1 {
         println!();
         println!(
-            "Using downloaded model: {} size {} ({})",
+            "Using local model files: {} size {} ({})",
             model_short_label(&downloaded[0].model),
             downloaded[0].size,
             model_size_download_label(&downloaded[0].model, &downloaded[0].size)
@@ -323,7 +322,7 @@ fn choose_downloaded_model(downloaded: &[DownloadedModel]) -> Result<DownloadedM
     }
 
     println!();
-    println!("Choose downloaded model:");
+    println!("Choose local model files:");
     for (index, item) in downloaded.iter().enumerate() {
         println!(
             "  {}) {} size {} ({})",
@@ -335,10 +334,10 @@ fn choose_downloaded_model(downloaded: &[DownloadedModel]) -> Result<DownloadedM
     }
     let allowed = numbered_choices(downloaded.len());
     let allowed_refs = allowed.iter().map(String::as_str).collect::<Vec<_>>();
-    let choice = prompt_choice("Downloaded model", &allowed_refs, "1")?;
+    let choice = prompt_choice("Local model", &allowed_refs, "1")?;
     let index = choice
         .parse::<usize>()
-        .map_err(|_| "invalid downloaded model choice".to_string())?
+        .map_err(|_| "invalid local model choice".to_string())?
         - 1;
     Ok(downloaded[index].clone())
 }
@@ -421,7 +420,7 @@ fn configure_pi_instructions_from_menu(config: &mut Config) -> Result<(), String
     Ok(())
 }
 
-fn downloaded_vendored_models(config: &Config) -> Result<Vec<DownloadedModel>, String> {
+fn downloaded_local_models(config: &Config) -> Result<Vec<DownloadedModel>, String> {
     let mut downloaded = Vec::new();
     for option in MODEL_OPTIONS {
         for size in ["m", "l"] {
@@ -429,7 +428,7 @@ fn downloaded_vendored_models(config: &Config) -> Result<Vec<DownloadedModel>, S
             candidate.model = option.id.to_string();
             candidate.size = size.to_string();
             candidate.prefer_remote = false;
-            if vendored_model_ready(&candidate)? {
+            if local_model_ready(&candidate)? {
                 downloaded.push(DownloadedModel {
                     model: candidate.model,
                     size: candidate.size,
@@ -496,15 +495,14 @@ fn print_help() {
            --host HOST         Bind host, default 127.0.0.1\n\
            --port PORT         Bind port, default 8000\n\
            --model MODEL       Hugging Face model id\n\
-           --models-dir DIR    Vendored models directory, default models\n\
+           --models-dir DIR    Local models directory, default models\n\
            --pi-models LIST    Comma-separated Pi model ids, default E4B,E2B\n\
            --size SIZE         Edge-LM size, default m\n\
            --context TOKENS    Context window, default 128000\n\
            --reinstall         Reinstall Python dependencies\n\
            --preload-model     Download/cache the selected model during setup/run\n\
-           --vendor-model      Download the selected model into --models-dir\n\
            --offline           Use local model/dependency caches only while running\n\
-           --prefer-remote     Ignore vendored model directory and use --model directly\n\
+           --prefer-remote     Use --model directly even if local model files exist\n\
            -h, --help          Show this help"
     );
 }
@@ -714,111 +712,16 @@ fn write_server(runtime_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn vendor_model(venv_python: &Path, config: &Config) -> Result<(), String> {
-    if model_looks_like_path(&config.model) {
-        return Err("--vendor-model expects --model to be a Hugging Face repo id".to_string());
-    }
-
-    let destination = vendored_model_path(config)?;
-    fs::create_dir_all(&destination)
-        .map_err(|e| format!("failed to create {}: {e}", destination.display()))?;
-
-    println!(
-        "downloading model into repository: {} -> {}",
-        config.model,
-        destination.display()
-    );
-
-    let code = "\
-from huggingface_hub import snapshot_download\n\
-import os\n\
-repo_id = os.environ['EDGE_LM_MODEL_ID']\n\
-local_dir = os.environ['EDGE_LM_VENDOR_DIR']\n\
-snapshot_download(repo_id=repo_id, local_dir=local_dir)\n\
-print(f'vendored {repo_id} into {local_dir}')\n";
-
-    run_inherit(
-        Command::new(venv_python)
-            .arg("-c")
-            .arg(code)
-            .env("EDGE_LM_MODEL_ID", &config.model)
-            .env("EDGE_LM_VENDOR_DIR", &destination),
-    )
-}
-
-fn ensure_vendored_model_files(config: &Config) -> Result<(), String> {
-    if vendored_model_ready(config)? {
-        println!(
-            "Found local vendored model files for size {}; skipping Git LFS pull.",
-            config.size
-        );
-        return Ok(());
-    }
-
-    if !run_quiet(Command::new("git").arg("lfs").arg("version")) {
-        return Err(
-            "Vendored model files require Git LFS. Install it with `brew install git-lfs`, then rerun `./run`."
-                .to_string(),
-        );
-    }
-
-    let include = vendored_lfs_include_paths(config).join(",");
-    println!("Downloading selected vendored files with Git LFS...");
-    println!("size: {}", config.size);
-    run_inherit(
-        Command::new("git")
-            .arg("lfs")
-            .arg("pull")
-            .arg("--include")
-            .arg(include)
-            .arg("--exclude")
-            .arg(""),
-    )?;
-
-    if vendored_model_ready(config)? {
-        Ok(())
-    } else {
-        Err("Git LFS finished, but selected vendored model files are still incomplete".to_string())
-    }
-}
-
-fn vendored_lfs_include_paths(config: &Config) -> Vec<String> {
-    let Some((org, repo)) = config.model.split_once('/') else {
-        return Vec::new();
-    };
-    let base = format!("{DEFAULT_MODELS_DIR}/{org}/{repo}");
-    let mut paths = vec![
-        format!("{base}/config.json"),
-        format!("{base}/audio_tower.safetensors"),
-        format!("{base}/vision_tower.safetensors"),
-        format!("{base}/tokenizer.json"),
-        format!("{base}/tokenizer_config.json"),
-        format!("{base}/chat_template.jinja"),
-        format!("{base}/ple_{}.safetensors", config.size),
-    ];
-
-    if config.model == DEFAULT_MODEL {
-        paths.extend([
-            format!("{base}/model_{}.safetensors.part00", config.size),
-            format!("{base}/model_{}.safetensors.part01", config.size),
-        ]);
-    } else {
-        paths.push(format!("{base}/model_{}.safetensors", config.size));
-    }
-
-    paths
-}
-
-fn vendored_model_ready(config: &Config) -> Result<bool, String> {
-    let vendored = vendored_model_path(config)?;
-    if !vendored.exists() {
+fn local_model_ready(config: &Config) -> Result<bool, String> {
+    let local_model = local_model_path(config)?;
+    if !local_model.exists() {
         return Ok(false);
     }
 
-    let model = vendored.join(format!("model_{}.safetensors", config.size));
+    let model = local_model.join(format!("model_{}.safetensors", config.size));
     let model_parts = [
-        vendored.join(format!("model_{}.safetensors.part00", config.size)),
-        vendored.join(format!("model_{}.safetensors.part01", config.size)),
+        local_model.join(format!("model_{}.safetensors.part00", config.size)),
+        local_model.join(format!("model_{}.safetensors.part01", config.size)),
     ];
     let model_ready = real_file_at_least(&model, 100 * 1024 * 1024)
         || model_parts
@@ -826,19 +729,22 @@ fn vendored_model_ready(config: &Config) -> Result<bool, String> {
             .all(|path| real_file_at_least(path, 100 * 1024 * 1024));
 
     Ok(model_ready
-        && real_file_at_least(&vendored.join("config.json"), 1024)
-        && real_file_at_least(&vendored.join("tokenizer_config.json"), 1024)
-        && real_file_at_least(&vendored.join("chat_template.jinja"), 1024)
+        && real_file_at_least(&local_model.join("config.json"), 1024)
+        && real_file_at_least(&local_model.join("tokenizer_config.json"), 1024)
+        && real_file_at_least(&local_model.join("chat_template.jinja"), 1024)
         && real_file_at_least(
-            &vendored.join(format!("ple_{}.safetensors", config.size)),
+            &local_model.join(format!("ple_{}.safetensors", config.size)),
             100 * 1024 * 1024,
         )
-        && real_file_at_least(&vendored.join("audio_tower.safetensors"), 100 * 1024 * 1024)
         && real_file_at_least(
-            &vendored.join("vision_tower.safetensors"),
+            &local_model.join("audio_tower.safetensors"),
             100 * 1024 * 1024,
         )
-        && real_file_at_least(&vendored.join("tokenizer.json"), 1024 * 1024))
+        && real_file_at_least(
+            &local_model.join("vision_tower.safetensors"),
+            100 * 1024 * 1024,
+        )
+        && real_file_at_least(&local_model.join("tokenizer.json"), 1024 * 1024))
 }
 
 fn real_file_at_least(path: &Path, min_bytes: u64) -> bool {
@@ -859,23 +765,23 @@ fn is_lfs_pointer(path: &Path) -> bool {
         .starts_with("version https://git-lfs.github.com/spec/v1")
 }
 
-fn restore_split_vendored_models(config: &Config) -> Result<(), String> {
+fn restore_split_local_models(config: &Config) -> Result<(), String> {
     if config.prefer_remote || model_looks_like_path(&config.model) {
         return Ok(());
     }
 
-    let vendored = vendored_model_path(config)?;
-    if !vendored.exists() {
+    let local_model = local_model_path(config)?;
+    if !local_model.exists() {
         return Ok(());
     }
 
     let expected_model_file = format!("model_{}.safetensors", config.size);
     let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-    let entries = fs::read_dir(&vendored)
-        .map_err(|e| format!("failed to read {}: {e}", vendored.display()))?;
+    let entries = fs::read_dir(&local_model)
+        .map_err(|e| format!("failed to read {}: {e}", local_model.display()))?;
 
     for entry in entries {
-        let entry = entry.map_err(|e| format!("failed to read {}: {e}", vendored.display()))?;
+        let entry = entry.map_err(|e| format!("failed to read {}: {e}", local_model.display()))?;
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -891,7 +797,7 @@ fn restore_split_vendored_models(config: &Config) -> Result<(), String> {
             continue;
         }
         groups
-            .entry(vendored.join(base_name))
+            .entry(local_model.join(base_name))
             .or_default()
             .push(path);
     }
@@ -903,7 +809,7 @@ fn restore_split_vendored_models(config: &Config) -> Result<(), String> {
 
         parts.sort();
         println!(
-            "reassembling vendored model file: {} from {} parts",
+            "reassembling local model file: {} from {} parts",
             target.display(),
             parts.len()
         );
@@ -1016,20 +922,23 @@ fn model_source(config: &Config) -> Result<PathBuf, String> {
         return Ok(absolutize(Path::new(&config.model))?);
     }
 
-    let vendored = vendored_model_path(config)?;
-    if vendored_model_ready(config)? {
-        return Ok(vendored);
+    let local_model = local_model_path(config)?;
+    if local_model_ready(config)? {
+        return Ok(local_model);
     }
 
     Ok(PathBuf::from(&config.model))
 }
 
-fn vendored_model_path(config: &Config) -> Result<PathBuf, String> {
+fn local_model_path(config: &Config) -> Result<PathBuf, String> {
     let models_dir = absolutize(&config.models_dir)?;
     let mut path = models_dir;
     for part in config.model.split('/') {
         if part.is_empty() || part == "." || part == ".." {
-            return Err(format!("invalid model id for vendoring: {}", config.model));
+            return Err(format!(
+                "invalid model id for local model path: {}",
+                config.model
+            ));
         }
         path.push(part);
     }
@@ -1049,9 +958,7 @@ fn print_pi_config(config: &Config) {
     println!("https://github.com/Dmitriy-Romanov/edge-lm-server");
     println!();
     println!("Quick start:");
-    println!(
-        "GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git"
-    );
+    println!("git clone https://github.com/Dmitriy-Romanov/edge-lm-server.git");
     println!("cd edge-lm-server");
     println!("./run");
     println!();
