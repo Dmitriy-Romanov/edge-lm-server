@@ -34,6 +34,17 @@ The Python server:
 
 This project targets Apple silicon macOS. The inference path depends on MLX, so
 a normal Linux Docker image is not a reliable runtime for this implementation.
+Python-only packaging does not make the current backend cross-platform.
+
+Potential backend split:
+
+```text
+MLX / Edge-LM safetensors -> Apple silicon macOS
+GGUF / llama.cpp          -> macOS, Linux, Windows
+```
+
+The GGUF / llama.cpp path is not implemented. Do not expose it in the menu until
+there is a real backend implementation.
 
 ## Model distribution strategy
 

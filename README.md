@@ -75,6 +75,30 @@ Approximate install sizes:
 Some shared files are also needed, such as the tokenizer, audio tower, and
 vision tower.
 
+## Backend support
+
+Current backend:
+
+```text
+MLX / Edge-LM safetensors
+  -> Apple silicon macOS
+```
+
+Potential future backend, not implemented yet:
+
+```text
+GGUF / llama.cpp
+  -> macOS, Linux, Windows
+```
+
+If GGUF support is added later, the menu could become:
+
+```text
+Choose backend:
+  1) Edge-LM MLX (Apple silicon, QAT safetensors)
+  2) llama.cpp GGUF (macOS/Linux/Windows)
+```
+
 ## Pi Agent config
 
 Add this provider to `~/.pi/agent/models.json`:
@@ -110,8 +134,8 @@ Add this provider to `~/.pi/agent/models.json`:
 
 ## Notes
 
-The server uses Apple's MLX runtime through Edge-LM, so it is intended for
-Apple silicon/macOS rather than Linux Docker.
+The server currently uses Apple's MLX runtime through Edge-LM, so it is intended
+for Apple silicon/macOS rather than Linux Docker or Windows.
 
 See [NOTICE.md](NOTICE.md) for model attribution and terms.
 Developer and maintainer notes live in [AGENTS.md](AGENTS.md).
