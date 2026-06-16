@@ -30,8 +30,7 @@ and opens a small menu. The menu asks:
 
 - whether to start existing local model files, if they are present
 - whether to show Pi Agent setup instructions
-- whether to download/install a model into `models/` or let Edge-LM fetch it on
-  first run
+- whether to download/install a model into `models/`
 - which model to run
 
 Model files are downloaded from the upstream TheStageAI repositories on Hugging
@@ -41,8 +40,11 @@ GitHub LFS, because public LFS bandwidth can be exhausted and break installs.
 The download/install menu option fetches the selected model into `models/`.
 That directory is ignored by git and can be copied to another Mac. The Python
 venv and package cache live under `.edge-lm-server/` and can be deleted
-independently. The remote option is simpler and lets Edge-LM download files into
-its Hugging Face cache as needed during startup.
+independently.
+
+Advanced users can still run directly from a Hugging Face model id with
+`--prefer-remote`, but the interactive menu intentionally installs models into
+`models/` so downloaded files are visible and portable.
 
 If you already ran this project before and want to refresh the upstream
 `TheStageAI/edge-lm` Python package, run:

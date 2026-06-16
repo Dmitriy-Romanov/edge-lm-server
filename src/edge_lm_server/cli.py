@@ -147,13 +147,11 @@ def configure_from_menu(config: Config) -> None:
         print("  1) Start server with local model files")
         print("  2) Show Pi Agent instructions")
         print("  3) Download/install selected model into models/")
-        print("  4) Use remote source (downloads from Hugging Face on first run)")
-        action = prompt_choice("Action", ["1", "2", "3", "4"], "1")
+        action = prompt_choice("Action", ["1", "2", "3"], "1")
     else:
         print("  1) Show Pi Agent instructions")
         print("  2) Download/install selected model into models/")
-        print("  3) Use remote source (downloads from Hugging Face on first run)")
-        action = prompt_choice("Action", ["1", "2", "3"], "3")
+        action = prompt_choice("Action", ["1", "2"], "2")
 
     if downloaded and action == "1":
         selected = choose_local_model(downloaded)
@@ -169,9 +167,6 @@ def configure_from_menu(config: Config) -> None:
         config.install_model = True
         config.offline = True
         choose_install_target(config)
-    else:
-        config.prefer_remote = True
-        choose_model(config, show_download_sizes=False)
 
     config.pi_models = [config.model]
     print()

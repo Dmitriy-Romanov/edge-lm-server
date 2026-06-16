@@ -93,9 +93,8 @@ The menu has a dedicated "Show Pi Agent instructions" action. Normal server
 startup should not print the provider JSON every time; keep that output in the
 instructions action or explicit setup flows.
 
-The menu supports two Hugging Face paths:
+The interactive menu supports one Hugging Face model path:
 
-- remote startup, where Edge-LM downloads model files as needed
 - install to `models/`, where the launcher uses `snapshot_download` with
   `allow_patterns` for the selected size and then starts from the local path in
   Hugging Face offline mode
@@ -103,6 +102,9 @@ The menu supports two Hugging Face paths:
 The `models/` directory is ignored by git and is the portable local model
 install location. A user can copy this directory to another Mac instead of
 re-downloading model files.
+
+Keep direct Hugging Face startup as an advanced CLI path through
+`--prefer-remote`; do not show it in the normal interactive menu.
 
 ## Useful launcher flags
 
