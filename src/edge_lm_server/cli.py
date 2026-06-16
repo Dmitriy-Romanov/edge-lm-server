@@ -65,8 +65,15 @@ class LocalModel:
 
 
 def main(argv: list[str] | None = None) -> int:
-    config = parse_args(argv or sys.argv[1:])
+    try:
+        return run(parse_args(argv or sys.argv[1:]))
+    except (KeyboardInterrupt, EOFError):
+        print()
+        print("Cancelled.")
+        return 130
 
+
+def run(config: Config) -> int:
     if config.action == "clean":
         clean_runtime(config.runtime_dir)
         return 0
@@ -134,35 +141,39 @@ def configure_from_menu(config: Config) -> None:
     print()
 
     downloaded = downloaded_local_models(config)
-    if downloaded:
-        print("Local model files:")
-        for index, item in enumerate(downloaded, start=1):
-            print(f"  {index}) {model_menu_label(item.model)} ({model_storage_label(item.model, item.size)})")
-    else:
-        print("Local model files: none")
+    if not downloaded:
+        print("No local models installed.")
+        config.prefer_remote = False
+        config.install_model = True
+        config.offline = True
+        choose_install_target(config)
+        config.pi_models = [config.model]
+        print()
+        print(f"Starting {config.model} with size {config.size} from {model_source_label(config)}.")
+        print()
+        return
+
+    print("Local model files:")
+    for index, item in enumerate(downloaded, start=1):
+        print(f"  {index}) {model_menu_label(item.model)} ({model_storage_label(item.model, item.size)})")
 
     print()
     print("Choose what to do:")
-    if downloaded:
-        print("  1) Start server with local model files")
-        print("  2) Show Pi Agent instructions")
-        print("  3) Download/install selected model into models/")
-        action = prompt_choice("Action", ["1", "2", "3"], "1")
-    else:
-        print("  1) Show Pi Agent instructions")
-        print("  2) Download/install selected model into models/")
-        action = prompt_choice("Action", ["1", "2"], "2")
+    print("  1) Start server with local model files")
+    print("  2) Show Pi Agent instructions")
+    print("  3) Download/install selected model into models/")
+    action = prompt_choice("Action", ["1", "2", "3"], "1")
 
-    if downloaded and action == "1":
+    if action == "1":
         selected = choose_local_model(downloaded)
         config.model = selected.model
         config.size = selected.size
         config.prefer_remote = False
-    elif (not downloaded and action == "1") or (downloaded and action == "2"):
+    elif action == "2":
         configure_pi_instructions_from_menu(config)
         print_pi_config(config)
         raise SystemExit(0)
-    elif (not downloaded and action == "2") or (downloaded and action == "3"):
+    elif action == "3":
         config.prefer_remote = False
         config.install_model = True
         config.offline = True
