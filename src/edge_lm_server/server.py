@@ -155,7 +155,7 @@ async def chat_completions(body: Dict[str, Any]):
     max_tokens = body.get("max_tokens", 16000)
     if max_tokens < 512:
         max_tokens = 16000
-    model_field = body.get("model", MODEL_NAME)
+    model_field = MODEL_NAME
     include_usage = bool((body.get("stream_options") or {}).get("include_usage"))
 
     formatted_messages = normalize_messages_for_template(messages)

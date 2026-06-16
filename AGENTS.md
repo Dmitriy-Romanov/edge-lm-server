@@ -77,6 +77,20 @@ The install menu exposes four QAT install targets: E4B/E2B with size `m` or
 `l`. The local start menu must show only variants that are actually installed
 under `models/`.
 
+Pi Agent-facing model ids must be local aliases, not upstream Hugging Face repo
+ids, because `m` and `l` sizes share the same upstream repo id. Current aliases:
+
+```text
+local-edge-e4b-m
+local-edge-e4b-l
+local-edge-e2b-m
+local-edge-e2b-l
+```
+
+The launcher maps each alias internally to the upstream repo id plus
+`EDGE_LM_SIZE`. A running server process exposes one selected alias at a time;
+do not imply that all installed variants are loaded concurrently.
+
 The user-facing entry point is:
 
 ```bash

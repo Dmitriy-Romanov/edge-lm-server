@@ -14,6 +14,7 @@ DEFAULT_MODELS_DIR = Path("models")
 DEFAULT_RUNTIME_DIR = Path(".edge-lm-server")
 DEFAULT_MODEL = "TheStageAI/gemma-4-E4B-it-qat"
 SMALLER_MODEL = "TheStageAI/gemma-4-E2B-it-qat"
+DEFAULT_PI_MODELS = "local-edge-e4b-m,local-edge-e4b-l,local-edge-e2b-m,local-edge-e2b-l"
 
 
 @dataclass(frozen=True)
@@ -104,7 +105,7 @@ def parse_args(argv: list[str]) -> Config:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
-    parser.add_argument("--pi-models", default=f"{DEFAULT_MODEL},{SMALLER_MODEL}")
+    parser.add_argument("--pi-models", default=DEFAULT_PI_MODELS)
     parser.add_argument("--size", default="m")
     parser.add_argument("--context", type=int, default=128_000)
     parser.add_argument("--reinstall", action="store_true")
@@ -147,15 +148,18 @@ def configure_from_menu(config: Config) -> None:
         config.install_model = True
         config.offline = True
         choose_install_target(config)
-        config.pi_models = [config.model]
+        config.pi_models = [model_alias(config.model, config.size)]
         print()
-        print(f"Starting {config.model} with size {config.size} from {model_source_label(config)}.")
+        print(
+            f"Starting {model_alias(config.model, config.size)} "
+            f"({config.model}, size {config.size}) from {model_source_label(config)}."
+        )
         print()
         return
 
     print("Local model files:")
     for index, item in enumerate(downloaded, start=1):
-        print(f"  {index}) {model_menu_label(item.model)} ({model_storage_label(item.model, item.size)})")
+        print(f"  {index}) {local_model_label(item.model, item.size)} ({model_storage_label(item.model, item.size)})")
 
     print()
     print("Choose what to do:")
@@ -179,9 +183,12 @@ def configure_from_menu(config: Config) -> None:
         config.offline = True
         choose_install_target(config)
 
-    config.pi_models = [config.model]
+    config.pi_models = [model_alias(config.model, config.size)]
     print()
-    print(f"Starting {config.model} with size {config.size} from {model_source_label(config)}.")
+    print(
+        f"Starting {model_alias(config.model, config.size)} "
+        f"({config.model}, size {config.size}) from {model_source_label(config)}."
+    )
     print()
 
 
@@ -189,13 +196,13 @@ def choose_local_model(downloaded: list[LocalModel]) -> LocalModel:
     if len(downloaded) == 1:
         item = downloaded[0]
         print()
-        print(f"Using local model files: {model_menu_label(item.model)} ({model_storage_label(item.model, item.size)})")
+        print(f"Using local model files: {local_model_label(item.model, item.size)} ({model_storage_label(item.model, item.size)})")
         return item
 
     print()
     print("Choose local model files:")
     for index, item in enumerate(downloaded, start=1):
-        print(f"  {index}) {model_menu_label(item.model)} ({model_storage_label(item.model, item.size)})")
+        print(f"  {index}) {local_model_label(item.model, item.size)} ({model_storage_label(item.model, item.size)})")
     choice = prompt_choice("Local model", numbered_choices(len(downloaded)), "1")
     return downloaded[int(choice) - 1]
 
@@ -218,10 +225,11 @@ def choose_model(config: Config, show_download_sizes: bool) -> None:
 def choose_install_target(config: Config) -> None:
     print()
     print("Choose model to install:")
-    targets = [(option, size) for option in MODEL_OPTIONS for size in ("m", "l")]
+    targets = model_variants()
     for index, (option, size) in enumerate(targets, start=1):
         print(
-            f"  {index}) {option.id} ({option.name}, {option.description}, "
+            f"  {index}) {model_alias(option.id, size)} -> {option.id} "
+            f"({option.name}, {option.description}, "
             f"size {size}, download {option.sizes[size]})"
         )
     choice = prompt_choice("Install model", numbered_choices(len(targets)), "1")
@@ -233,16 +241,20 @@ def choose_install_target(config: Config) -> None:
 def configure_pi_instructions_from_menu(config: Config) -> None:
     print()
     print("Choose model to show in Pi Agent config:")
-    for index, option in enumerate(MODEL_OPTIONS, start=1):
-        print(f"  {index}) {option.id} ({option.name}, {option.description})")
-    print("  3) Both models")
-    choice = prompt_choice("Pi Agent model", ["1", "2", "3"], "3")
-    if choice == "1":
-        config.pi_models = [DEFAULT_MODEL]
-    elif choice == "2":
-        config.pi_models = [SMALLER_MODEL]
+    variants = model_variants()
+    for index, (option, size) in enumerate(variants, start=1):
+        print(
+            f"  {index}) {model_alias(option.id, size)} "
+            f"({option.name}, {option.description}, size {size})"
+        )
+    all_choice = str(len(variants) + 1)
+    print(f"  {all_choice}) All local aliases")
+    choice = prompt_choice("Pi Agent model", numbered_choices(len(variants) + 1), all_choice)
+    if choice == all_choice:
+        config.pi_models = [model_alias(option.id, size) for option, size in variants]
     else:
-        config.pi_models = [option.id for option in MODEL_OPTIONS]
+        option, size = variants[int(choice) - 1]
+        config.pi_models = [model_alias(option.id, size)]
 
 
 def prompt_choice(prompt: str, allowed: list[str], default: str) -> str:
@@ -259,14 +271,13 @@ def numbered_choices(count: int) -> list[str]:
 
 def downloaded_local_models(config: Config) -> list[LocalModel]:
     downloaded = []
-    for option in MODEL_OPTIONS:
-        for size in ("m", "l"):
-            candidate = copy_config(config)
-            candidate.model = option.id
-            candidate.size = size
-            candidate.prefer_remote = False
-            if local_model_ready(candidate):
-                downloaded.append(LocalModel(model=option.id, size=size))
+    for option, size in model_variants():
+        candidate = copy_config(config)
+        candidate.model = option.id
+        candidate.size = size
+        candidate.prefer_remote = False
+        if local_model_ready(candidate):
+            downloaded.append(LocalModel(model=option.id, size=size))
     return downloaded
 
 
@@ -281,6 +292,10 @@ def model_menu_label(model: str) -> str:
     return f"{option.id} ({option.name}, {option.description})"
 
 
+def local_model_label(model: str, size: str) -> str:
+    return f"{model_alias(model, size)} -> {model_menu_label(model)}"
+
+
 def model_storage_label(model: str, size: str) -> str:
     storage = model_size_download_label(model, size)
     if size == "m":
@@ -293,6 +308,17 @@ def model_size_download_label(model: str, size: str) -> str:
     if option is None:
         return "unknown size"
     return option.sizes.get(size, "unknown size")
+
+
+def model_alias(model: str, size: str) -> str:
+    option = model_option(model)
+    if option is None:
+        return f"local-edge-{size}"
+    return f"local-edge-{option.name.lower()}-{size}"
+
+
+def model_variants() -> list[tuple[ModelOption, str]]:
+    return [(option, size) for option in MODEL_OPTIONS for size in ("m", "l")]
 
 
 def model_option(model: str) -> ModelOption | None:
@@ -401,7 +427,11 @@ def preload_model(config: Config) -> None:
 
 def run_server(config: Config) -> None:
     model_source = resolve_model_source(config)
-    print(f"starting server at http://{config.host}:{config.port} using {config.model} ({config.size}) from {model_source}")
+    print(
+        f"starting server at http://{config.host}:{config.port} using "
+        f"{model_alias(config.model, config.size)} ({config.model}, size {config.size}) "
+        f"from {model_source}"
+    )
     print(f"runtime: {config.runtime_dir}")
     env = runtime_env(config, model_source)
     subprocess.run([sys.executable, "-m", "edge_lm_server.server"], check=True, env=env, cwd=Path.cwd())
@@ -413,7 +443,7 @@ def runtime_env(config: Config, model_source: Path | str) -> dict[str, str]:
     python_path = str(Path.cwd() / "src")
     env["PYTHONPATH"] = python_path if not env.get("PYTHONPATH") else f"{python_path}{os.pathsep}{env['PYTHONPATH']}"
     env["EDGE_LM_MODEL_SOURCE"] = str(model_source)
-    env["EDGE_LM_MODEL_ID"] = config.model
+    env["EDGE_LM_MODEL_ID"] = model_alias(config.model, config.size)
     env["EDGE_LM_SIZE"] = config.size
     env["EDGE_LM_CONTEXT_TOKENS"] = str(config.context_tokens)
     env["EDGE_LM_HOST"] = config.host
@@ -483,7 +513,10 @@ def print_pi_config(config: Config) -> None:
     }
     print('    "local-edge": ' + json.dumps(provider, indent=2).replace("\n", "\n    "))
     print()
-    print(f"The server process will load {config.model}. Restart with --model to use another model.")
+    print(
+        "The server process will expose the selected local alias. "
+        "One running server process serves one selected model alias at a time."
+    )
     print()
 
 

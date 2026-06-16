@@ -70,6 +70,17 @@ separate backend.
 
 The install menu can download four local variants: E4B/E2B in `m` or `l` size.
 The start menu only shows variants that are already installed under `models/`.
+Pi Agent sees local aliases, not the upstream Hugging Face ids, so each size is
+unambiguous:
+
+- `local-edge-e4b-m`
+- `local-edge-e4b-l`
+- `local-edge-e2b-m`
+- `local-edge-e2b-l`
+
+One running server process serves one selected alias at a time. If you switch
+from `local-edge-e4b-m` to `local-edge-e4b-l`, restart the server from `./run`
+and choose the other installed variant.
 
 Approximate install sizes:
 
@@ -122,13 +133,25 @@ Add this provider to `~/.pi/agent/models.json`:
     },
     "models": [
       {
-        "id": "TheStageAI/gemma-4-E4B-it-qat",
+        "id": "local-edge-e4b-m",
         "contextWindow": 128000,
         "maxTokens": 16000,
         "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
       },
       {
-        "id": "TheStageAI/gemma-4-E2B-it-qat",
+        "id": "local-edge-e4b-l",
+        "contextWindow": 128000,
+        "maxTokens": 16000,
+        "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+      },
+      {
+        "id": "local-edge-e2b-m",
+        "contextWindow": 128000,
+        "maxTokens": 16000,
+        "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+      },
+      {
+        "id": "local-edge-e2b-l",
         "contextWindow": 128000,
         "maxTokens": 16000,
         "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
