@@ -16,16 +16,16 @@ const MODEL_OPTIONS: &[ModelOption] = &[
     ModelOption {
         id: DEFAULT_MODEL,
         name: "E4B",
-        description: "QAT, higher quality",
-        size_m_download: "model 2.3 GB, total about 3.1 GB",
-        size_l_download: "model 2.8 GB, total about 3.7 GB",
+        description: "larger QAT model",
+        size_m_download: "about 3.1 GB",
+        size_l_download: "about 3.7 GB",
     },
     ModelOption {
         id: SMALLER_MODEL,
         name: "E2B",
-        description: "QAT, smaller and faster",
-        size_m_download: "model 1.1 GB, total about 1.8 GB",
-        size_l_download: "model 1.4 GB, total about 2.1 GB",
+        description: "smaller QAT model",
+        size_m_download: "about 1.8 GB",
+        size_l_download: "about 2.1 GB",
     },
 ];
 const PYTHON_CANDIDATES: &[&str] = &[
@@ -248,11 +248,10 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
         println!("Local model files:");
         for (index, item) in downloaded.iter().enumerate() {
             println!(
-                "  {}) {} size {} ({})",
+                "  {}) {} ({})",
                 index + 1,
-                model_short_label(&item.model),
-                item.size,
-                model_size_download_label(&item.model, &item.size)
+                model_menu_label(&item.model),
+                model_storage_label(&item.model, &item.size)
             );
         }
     }
@@ -319,10 +318,9 @@ fn choose_downloaded_model(downloaded: &[DownloadedModel]) -> Result<DownloadedM
     if downloaded.len() == 1 {
         println!();
         println!(
-            "Using local model files: {} size {} ({})",
-            model_short_label(&downloaded[0].model),
-            downloaded[0].size,
-            model_size_download_label(&downloaded[0].model, &downloaded[0].size)
+            "Using local model files: {} ({})",
+            model_menu_label(&downloaded[0].model),
+            model_storage_label(&downloaded[0].model, &downloaded[0].size)
         );
         return Ok(downloaded[0].clone());
     }
@@ -331,11 +329,10 @@ fn choose_downloaded_model(downloaded: &[DownloadedModel]) -> Result<DownloadedM
     println!("Choose local model files:");
     for (index, item) in downloaded.iter().enumerate() {
         println!(
-            "  {}) {} size {} ({})",
+            "  {}) {} ({})",
             index + 1,
-            model_short_label(&item.model),
-            item.size,
-            model_size_download_label(&item.model, &item.size)
+            model_menu_label(&item.model),
+            model_storage_label(&item.model, &item.size)
         );
     }
     let allowed = numbered_choices(downloaded.len());
@@ -354,7 +351,7 @@ fn choose_model(config: &mut Config, show_download_sizes: bool) -> Result<(), St
     for (index, option) in MODEL_OPTIONS.iter().enumerate() {
         if show_download_sizes {
             println!(
-                "  {}) {} ({}, {}; default m download {})",
+                "  {}) {} ({}, {}, download {})",
                 index + 1,
                 option.id,
                 option.name,
@@ -432,12 +429,21 @@ fn downloaded_local_models(config: &Config) -> Result<Vec<DownloadedModel>, Stri
     Ok(downloaded)
 }
 
-fn model_short_label(model: &str) -> String {
+fn model_menu_label(model: &str) -> String {
     MODEL_OPTIONS
         .iter()
         .find(|option| option.id == model)
-        .map(|option| format!("{} ({})", option.id, option.name))
+        .map(|option| format!("{} ({}, {})", option.id, option.name, option.description))
         .unwrap_or_else(|| model.to_string())
+}
+
+fn model_storage_label(model: &str, size: &str) -> String {
+    let storage = model_size_download_label(model, size);
+    if size == "m" {
+        format!("{storage} installed")
+    } else {
+        format!("{storage} installed, Edge-LM size {size}")
+    }
 }
 
 fn model_size_download_label(model: &str, size: &str) -> &'static str {

@@ -65,17 +65,12 @@ The interactive menu uses size `m` by default. Size `l` is still available for
 manual runs through `--size l`, but it is intentionally not shown in the normal
 menu.
 
-Approximate model file sizes:
+Approximate install sizes:
 
-For E4B:
-
-- `m`: about 2.4 GB for the main model file, about 3.1 GB total
-- `l`: about 3.0 GB for the main model file, about 3.7 GB total
-
-For E2B:
-
-- `m`: about 1.2 GB for the main model file, about 1.8 GB total
-- `l`: about 1.5 GB for the main model file, about 2.1 GB total
+- E4B `m`: about 3.1 GB
+- E4B `l`: about 3.7 GB
+- E2B `m`: about 1.8 GB
+- E2B `l`: about 2.1 GB
 
 Some shared files are also needed, such as the tokenizer, audio tower, and
 vision tower.
