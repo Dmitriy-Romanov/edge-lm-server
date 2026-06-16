@@ -4,19 +4,23 @@ Development notes for humans and coding agents working on this repository.
 
 ## Project purpose
 
-`edge-lm-server` is a small Rust launcher plus Python FastAPI server for running
+`edge-lm-server` is a Python launcher plus FastAPI server for running
 TheStageAI Edge-LM Gemma models locally as an OpenAI-compatible endpoint for Pi
 Agent.
 
-The Rust binary:
+The root `./run` script:
 
-- creates `.edge-lm-server`
-- creates and manages a Python venv
+- creates `.edge-lm-server/.venv`
 - installs `git+https://github.com/TheStageAI/edge-lm.git`, `fastapi`, and
-  `uvicorn`
-- writes the bundled `src/server.py` into the runtime directory
+  `uvicorn` into that venv
+- sets `PYTHONPATH=src`
+- starts `edge_lm_server.cli menu`
+
+The Python CLI:
+
+- manages the interactive menu
+- installs selected model files into `models/`
 - starts the server with the selected model configuration
-- supports an interactive `menu` action used by the root `./run` script
 
 The Python server:
 
@@ -68,10 +72,10 @@ The user-facing entry point is:
 ./run
 ```
 
-That script builds the release binary and runs:
+That script bootstraps the venv and runs:
 
 ```bash
-./target/release/edge-lm-server menu
+python -m edge_lm_server.cli menu
 ```
 
 The menu has a dedicated "Show Pi Agent instructions" action. Normal server
@@ -150,9 +154,8 @@ vendoring weights.
 Run these after code changes:
 
 ```bash
-cargo fmt --check
-cargo check
-cargo run -- --help
+python -m compileall src
+./run --help
 ```
 
 For packaging changes, also verify:

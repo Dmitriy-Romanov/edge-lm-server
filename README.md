@@ -3,8 +3,8 @@
 OpenAI-compatible local gateway for running Edge-LM Gemma models with Pi Agent
 on Apple silicon Macs.
 
-The launcher prepares a local Python runtime, starts the MLX-based Edge-LM
-server, and exposes it at:
+The launcher prepares a local Python venv, starts the MLX-based Edge-LM server,
+and exposes it at:
 
 ```bash
 http://127.0.0.1:8000/v1
@@ -13,7 +13,6 @@ http://127.0.0.1:8000/v1
 ## Requirements
 
 - macOS on Apple silicon
-- Rust/Cargo
 - Python 3.10 or newer
 
 ## Quick start
@@ -26,7 +25,8 @@ cd edge-lm-server
 ./run
 ```
 
-`./run` builds the launcher and opens a small menu. The menu asks:
+`./run` creates `.edge-lm-server/.venv`, installs Python dependencies there,
+and opens a small menu. The menu asks:
 
 - whether to start existing local model files, if they are present
 - whether to show Pi Agent setup instructions
@@ -39,9 +39,10 @@ Face. This repository intentionally does not distribute model weights through
 GitHub LFS, because public LFS bandwidth can be exhausted and break installs.
 
 The download/install menu option fetches the selected model into `models/`.
-That directory is ignored by git and can be copied to another Mac. The remote
-option is simpler and lets Edge-LM download files into its Hugging Face cache as
-needed during startup.
+That directory is ignored by git and can be copied to another Mac. The Python
+venv and package cache live under `.edge-lm-server/` and can be deleted
+independently. The remote option is simpler and lets Edge-LM download files into
+its Hugging Face cache as needed during startup.
 
 If you already ran this project before and want to refresh the upstream
 `TheStageAI/edge-lm` Python package, run:

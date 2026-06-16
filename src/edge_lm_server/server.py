@@ -17,7 +17,7 @@ model = None
 tokenizer = None
 MODEL_SOURCE = os.environ.get(
     "EDGE_LM_MODEL_SOURCE",
-    os.environ.get("EDGE_LM_MODEL", "TheStageAI/gemma-4-E4B-it"),
+    os.environ.get("EDGE_LM_MODEL", "TheStageAI/gemma-4-E4B-it-qat"),
 )
 MODEL_NAME = os.environ.get("EDGE_LM_MODEL_ID", MODEL_SOURCE)
 MODEL_SIZE = os.environ.get("EDGE_LM_SIZE", "m")
@@ -113,6 +113,7 @@ def build_prompt_ids(
             return ids
         rest.pop(0)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global model, tokenizer
@@ -122,7 +123,9 @@ async def lifespan(app: FastAPI):
     yield
     print("Unloading model from memory...")
 
+
 app = FastAPI(title="TheStage AI Edge-LM OpenAI Server", lifespan=lifespan)
+
 
 @app.get("/v1/models")
 async def list_models():
@@ -133,28 +136,28 @@ async def list_models():
                 "id": MODEL_NAME,
                 "object": "model",
                 "created": int(time.time()),
-                "owned_by": "thestageai"
+                "owned_by": "thestageai",
             }
-        ]
+        ],
     }
+
 
 @app.post("/v1/chat/completions")
 async def chat_completions(body: Dict[str, Any]):
     global model, tokenizer
     if model is None or tokenizer is None:
         raise HTTPException(status_code=500, detail="Model is not loaded yet")
-    
+
     messages = body.get("messages", [])
     if not messages:
         raise HTTPException(status_code=400, detail="'messages' is missing or empty")
-    
-    # Use Pi Agent's requested value, but keep generation useful for tiny values.
+
     max_tokens = body.get("max_tokens", 16000)
-    if max_tokens < 512: 
+    if max_tokens < 512:
         max_tokens = 16000
     model_field = body.get("model", MODEL_NAME)
     include_usage = bool((body.get("stream_options") or {}).get("include_usage"))
-    
+
     formatted_messages = normalize_messages_for_template(messages)
     template_kwargs = {}
     if body.get("tools"):
@@ -166,7 +169,7 @@ async def chat_completions(body: Dict[str, Any]):
         print(f"[tools] received {len(tool_names)}: {', '.join(tool_names)}", flush=True)
     else:
         print("[tools] none received", flush=True)
-    
+
     chat_id = f"chatcmpl-{int(time.time())}"
     max_prompt_tokens = max(1, MAX_CONTEXT_TOKENS - max_tokens)
     ids = build_prompt_ids(formatted_messages, template_kwargs, max_prompt_tokens)
@@ -177,9 +180,11 @@ async def chat_completions(body: Dict[str, Any]):
     )
 
     async def generate_chunks_async():
-        # Send the initial role chunk before generation output.
         initial_chunk = {
-            "id": chat_id, "object": "chat.completion.chunk", "created": int(time.time()), "model": model_field,
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model_field,
             "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
             "usage": None,
         }
@@ -190,9 +195,9 @@ async def chat_completions(body: Dict[str, Any]):
         started_at = time.perf_counter()
         last_log_at = started_at
         for result in stream_generate(
-            model, 
-            tokenizer, 
-            "", 
+            model,
+            tokenizer,
+            "",
             input_ids=mx.array([ids], dtype=mx.int32),
             max_tokens=max_tokens,
         ):
@@ -207,7 +212,6 @@ async def chat_completions(body: Dict[str, Any]):
                     flush=True,
                 )
                 last_log_at = now
-            # Let FastAPI flush chunks while staying on the MLX thread.
             await asyncio.sleep(0)
 
         generated_text = "".join(text_parts)
@@ -271,10 +275,12 @@ async def chat_completions(body: Dict[str, Any]):
             }
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             await asyncio.sleep(0)
-        
-        # Send the final stop chunk.
+
         final_chunk = {
-            "id": chat_id, "object": "chat.completion.chunk", "created": int(time.time()), "model": model_field,
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model_field,
             "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
             "usage": None,
         }
@@ -296,6 +302,7 @@ async def chat_completions(body: Dict[str, Any]):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate_chunks_async(), media_type="text/event-stream")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host=HOST, port=PORT)
