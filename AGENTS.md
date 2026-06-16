@@ -80,12 +80,13 @@ instructions action or explicit setup flows.
 The menu supports two Hugging Face paths:
 
 - remote startup, where Edge-LM downloads model files as needed
-- preload/cache, where the launcher first calls `load(...)` to populate
-  `.edge-lm-server/hf-home`, then starts the server in Hugging Face offline mode
+- install to `models/`, where the launcher uses `snapshot_download` with
+  `allow_patterns` for the selected size and then starts from the local path in
+  Hugging Face offline mode
 
-The `models/` directory is ignored by git. It is only a local/legacy model file
-location. Existing local model files can still be detected and started, but new
-users should not rely on this path.
+The `models/` directory is ignored by git and is the portable local model
+install location. A user can copy this directory to another Mac instead of
+re-downloading model files.
 
 ## Useful launcher flags
 
@@ -99,10 +100,14 @@ users should not rely on this path.
 --size SIZE
 --context TOKENS
 --reinstall
+--install-model
 --preload-model
 --offline
 --prefer-remote
 ```
+
+`--install-model` downloads selected model files into `models/` by default. It
+does not use Git LFS and should remain selective, not a full repository mirror.
 
 `--preload-model` caches a model under `.edge-lm-server/hf-home`.
 

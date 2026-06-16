@@ -30,18 +30,18 @@ cd edge-lm-server
 
 - whether to start existing local model files, if they are present
 - whether to show Pi Agent setup instructions
-- whether to pre-download/cache a model from Hugging Face or let Edge-LM fetch
-  it on first run
+- whether to download/install a model into `models/` or let Edge-LM fetch it on
+  first run
 - which model to run
 
 Model files are downloaded from the upstream TheStageAI repositories on Hugging
 Face. This repository intentionally does not distribute model weights through
 GitHub LFS, because public LFS bandwidth can be exhausted and break installs.
 
-The download/cache menu option fetches the selected model into
-`.edge-lm-server/hf-home` and then starts the server in Hugging Face offline
-mode. The remote option is simpler and lets Edge-LM download files as needed
-during startup.
+The download/install menu option fetches the selected model into `models/`.
+That directory is ignored by git and can be copied to another Mac. The remote
+option is simpler and lets Edge-LM download files into its Hugging Face cache as
+needed during startup.
 
 If you already ran this project before and want to refresh the upstream
 `TheStageAI/edge-lm` Python package, run:
@@ -69,13 +69,13 @@ Approximate model file sizes:
 
 For E4B:
 
-- `m`: about 2.3 GB for the main model file, about 3.1 GB total
-- `l`: about 2.8 GB for the main model file, about 3.7 GB total
+- `m`: about 2.4 GB for the main model file, about 3.1 GB total
+- `l`: about 3.0 GB for the main model file, about 3.7 GB total
 
 For E2B:
 
-- `m`: about 1.1 GB for the main model file, about 1.8 GB total
-- `l`: about 1.4 GB for the main model file, about 2.1 GB total
+- `m`: about 1.2 GB for the main model file, about 1.8 GB total
+- `l`: about 1.5 GB for the main model file, about 2.1 GB total
 
 Some shared files are also needed, such as the tokenizer, audio tower, and
 vision tower.

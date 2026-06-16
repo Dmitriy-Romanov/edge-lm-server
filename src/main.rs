@@ -66,6 +66,7 @@ struct Config {
     size: String,
     context_tokens: usize,
     reinstall: bool,
+    install_model: bool,
     preload_model: bool,
     offline: bool,
     prefer_remote: bool,
@@ -99,6 +100,7 @@ impl Default for Config {
             size: "m".to_string(),
             context_tokens: 128_000,
             reinstall: false,
+            install_model: false,
             preload_model: false,
             offline: false,
             prefer_remote: false,
@@ -145,6 +147,9 @@ fn real_main() -> Result<(), String> {
     ensure_pip(&venv_python)?;
     install_dependencies(&venv_python, &git, &runtime_dir, config.reinstall)?;
     write_server(&runtime_dir)?;
+    if config.install_model {
+        install_model_files(&venv_python, &config)?;
+    }
     if config.preload_model {
         preload_model(&venv_python, &runtime_dir, &config)?;
     }
@@ -214,6 +219,7 @@ fn parse_args(args: Vec<String>) -> Result<Config, String> {
                     .map_err(|_| "--context must be a number".to_string())?;
             }
             "--reinstall" => config.reinstall = true,
+            "--install-model" => config.install_model = true,
             "--preload-model" => config.preload_model = true,
             "--offline" => config.offline = true,
             "--prefer-remote" => config.prefer_remote = true,
@@ -255,13 +261,13 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
     println!("Choose what to do:");
     let action = if downloaded.is_empty() {
         println!("  1) Show Pi Agent instructions");
-        println!("  2) Download/cache selected model from Hugging Face");
+        println!("  2) Download/install selected model into models/");
         println!("  3) Use remote source (downloads from Hugging Face on first run)");
         prompt_choice("Action", &["1", "2", "3"], "3")?
     } else {
         println!("  1) Start server with local model files");
         println!("  2) Show Pi Agent instructions");
-        println!("  3) Download/cache selected model from Hugging Face");
+        println!("  3) Download/install selected model into models/");
         println!("  4) Use remote source (downloads from Hugging Face on first run)");
         prompt_choice("Action", &["1", "2", "3", "4"], "1")?
     };
@@ -278,8 +284,8 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
         std::process::exit(0);
     } else if (downloaded.is_empty() && action == "2") || (!downloaded.is_empty() && action == "3")
     {
-        config.prefer_remote = true;
-        config.preload_model = true;
+        config.prefer_remote = false;
+        config.install_model = true;
         config.offline = true;
         choose_model(config, true)?;
     } else {
@@ -487,6 +493,7 @@ fn print_help() {
            --size SIZE         Edge-LM size, default m\n\
            --context TOKENS    Context window, default 128000\n\
            --reinstall         Reinstall Python dependencies\n\
+           --install-model     Download selected model files into --models-dir\n\
            --preload-model     Download/cache the selected model during setup/run\n\
            --offline           Use local model/dependency caches only while running\n\
            --prefer-remote     Use --model directly even if local model files exist\n\
@@ -699,6 +706,73 @@ fn write_server(runtime_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn install_model_files(venv_python: &Path, config: &Config) -> Result<(), String> {
+    if model_looks_like_path(&config.model) {
+        return Err("--install-model expects --model to be a Hugging Face repo id".to_string());
+    }
+
+    let destination = local_model_path(config)?;
+    if local_model_ready(config)? {
+        println!(
+            "local model files already exist: {} ({})",
+            destination.display(),
+            config.size
+        );
+        return Ok(());
+    }
+
+    fs::create_dir_all(&destination)
+        .map_err(|e| format!("failed to create {}: {e}", destination.display()))?;
+
+    let patterns = model_install_patterns(&config.size).join("\n");
+    println!(
+        "downloading model files into {}: {} ({})",
+        destination.display(),
+        config.model,
+        config.size
+    );
+
+    let code = "\
+from huggingface_hub import snapshot_download\n\
+import os\n\
+repo_id = os.environ['EDGE_LM_MODEL_ID']\n\
+local_dir = os.environ['EDGE_LM_LOCAL_MODEL_DIR']\n\
+patterns = os.environ['EDGE_LM_ALLOW_PATTERNS'].splitlines()\n\
+snapshot_download(repo_id=repo_id, local_dir=local_dir, allow_patterns=patterns)\n\
+print(f'installed {repo_id} into {local_dir}')\n";
+
+    run_inherit(
+        Command::new(venv_python)
+            .arg("-c")
+            .arg(code)
+            .env("EDGE_LM_MODEL_ID", &config.model)
+            .env("EDGE_LM_LOCAL_MODEL_DIR", &destination)
+            .env("EDGE_LM_ALLOW_PATTERNS", patterns),
+    )?;
+
+    if local_model_ready(config)? {
+        Ok(())
+    } else {
+        Err(format!(
+            "download finished, but local model files are incomplete: {}",
+            destination.display()
+        ))
+    }
+}
+
+fn model_install_patterns(size: &str) -> Vec<String> {
+    vec![
+        "config.json".to_string(),
+        "tokenizer.json".to_string(),
+        "tokenizer_config.json".to_string(),
+        "audio_tower.safetensors".to_string(),
+        "vision_tower.safetensors".to_string(),
+        format!("model_{size}.safetensors"),
+        format!("ple_{size}.safetensors"),
+        format!("summary_{size}.json"),
+    ]
+}
+
 fn local_model_ready(config: &Config) -> Result<bool, String> {
     let local_model = local_model_path(config)?;
     if !local_model.exists() {
@@ -718,7 +792,6 @@ fn local_model_ready(config: &Config) -> Result<bool, String> {
     Ok(model_ready
         && real_file_at_least(&local_model.join("config.json"), 1024)
         && real_file_at_least(&local_model.join("tokenizer_config.json"), 1024)
-        && real_file_at_least(&local_model.join("chat_template.jinja"), 1024)
         && real_file_at_least(
             &local_model.join(format!("ple_{}.safetensors", config.size)),
             100 * 1024 * 1024,
