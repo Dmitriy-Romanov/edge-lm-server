@@ -138,6 +138,10 @@ even if local model files exist under `models/`.
 Use `--reinstall` when upstream `TheStageAI/edge-lm` changed and the local venv
 should be refreshed.
 
+Python dependencies are intentionally not pinned. Keep the local venv
+disposable and prefer latest-on-install/latest-on-reinstall behavior unless the
+project explicitly changes direction.
+
 ## Upstream sync notes
 
 Before changing model ids or sizes, check upstream metadata without downloading

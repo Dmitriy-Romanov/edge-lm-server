@@ -53,6 +53,10 @@ If you already ran this project before and want to refresh the upstream
 ./run --reinstall
 ```
 
+Python dependencies are intentionally not pinned. The local venv is disposable:
+delete `.edge-lm-server/` or run `./run --reinstall` to get the latest available
+upstream packages.
+
 ## Models
 
 The menu currently supports the upstream QAT model ids:
