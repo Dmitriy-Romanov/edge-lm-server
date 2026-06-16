@@ -61,13 +61,15 @@ These repositories also advertise GGUF files upstream, but this gateway uses
 the native Edge-LM / MLX checkpoint path, not llama.cpp. GGUF support would be a
 separate backend.
 
-The interactive menu installs the default `m` checkpoint only. There are two
-normal user choices: the larger E4B QAT model or the smaller E2B QAT model.
+The install menu can download four local variants: E4B/E2B in `m` or `l` size.
+The start menu only shows variants that are already installed under `models/`.
 
 Approximate install sizes:
 
-- E4B QAT: about 3.1 GB
-- E2B QAT: about 1.8 GB
+- E4B QAT `m`: about 3.1 GB
+- E4B QAT `l`: about 3.7 GB
+- E2B QAT `m`: about 1.8 GB
+- E2B QAT `l`: about 2.1 GB
 
 Some shared files are also needed, such as the tokenizer, audio tower, and
 vision tower.

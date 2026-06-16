@@ -18,12 +18,14 @@ const MODEL_OPTIONS: &[ModelOption] = &[
         name: "E4B",
         description: "larger QAT model",
         size_m_download: "about 3.1 GB",
+        size_l_download: "about 3.7 GB",
     },
     ModelOption {
         id: SMALLER_MODEL,
         name: "E2B",
         description: "smaller QAT model",
         size_m_download: "about 1.8 GB",
+        size_l_download: "about 2.1 GB",
     },
 ];
 const PYTHON_CANDIDATES: &[&str] = &[
@@ -76,6 +78,7 @@ struct ModelOption {
     name: &'static str,
     description: &'static str,
     size_m_download: &'static str,
+    size_l_download: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -283,7 +286,7 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
         config.prefer_remote = false;
         config.install_model = true;
         config.offline = true;
-        choose_model(config, true)?;
+        choose_install_target(config)?;
     } else {
         config.prefer_remote = true;
         choose_model(config, false)?;
@@ -381,6 +384,45 @@ fn choose_model(config: &mut Config, show_download_sizes: bool) -> Result<(), St
     Ok(())
 }
 
+fn choose_install_target(config: &mut Config) -> Result<(), String> {
+    println!();
+    println!("Choose model to install:");
+
+    let mut targets = Vec::new();
+    for option in MODEL_OPTIONS {
+        for size in ["m", "l"] {
+            targets.push((option, size));
+        }
+    }
+
+    for (index, (option, size)) in targets.iter().enumerate() {
+        println!(
+            "  {}) {} ({}, {}, size {}, download {})",
+            index + 1,
+            option.id,
+            option.name,
+            option.description,
+            size,
+            model_size_download_label(option.id, size)
+        );
+    }
+
+    let choices = numbered_choices(targets.len());
+    let choice_refs = choices.iter().map(String::as_str).collect::<Vec<_>>();
+    let choice = prompt_choice("Install model", &choice_refs, "1")?;
+    let index = choice
+        .parse::<usize>()
+        .map_err(|_| "invalid install model choice".to_string())?
+        - 1;
+    let (option, size) = targets
+        .get(index)
+        .ok_or_else(|| "invalid install model choice".to_string())?;
+    config.model = option.id.to_string();
+    config.size = (*size).to_string();
+
+    Ok(())
+}
+
 fn configure_pi_instructions_from_menu(config: &mut Config) -> Result<(), String> {
     println!();
     println!("Choose model to show in Pi Agent config:");
@@ -410,15 +452,17 @@ fn configure_pi_instructions_from_menu(config: &mut Config) -> Result<(), String
 fn downloaded_local_models(config: &Config) -> Result<Vec<DownloadedModel>, String> {
     let mut downloaded = Vec::new();
     for option in MODEL_OPTIONS {
-        let mut candidate = config.clone();
-        candidate.model = option.id.to_string();
-        candidate.size = "m".to_string();
-        candidate.prefer_remote = false;
-        if local_model_ready(&candidate)? {
-            downloaded.push(DownloadedModel {
-                model: candidate.model,
-                size: candidate.size,
-            });
+        for size in ["m", "l"] {
+            let mut candidate = config.clone();
+            candidate.model = option.id.to_string();
+            candidate.size = size.to_string();
+            candidate.prefer_remote = false;
+            if local_model_ready(&candidate)? {
+                downloaded.push(DownloadedModel {
+                    model: candidate.model,
+                    size: candidate.size,
+                });
+            }
         }
     }
     Ok(downloaded)
@@ -446,7 +490,7 @@ fn model_size_download_label(model: &str, size: &str) -> &'static str {
         return "unknown size";
     };
     if size == "l" {
-        "advanced size l"
+        option.size_l_download
     } else {
         option.size_m_download
     }
