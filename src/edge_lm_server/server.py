@@ -62,7 +62,7 @@ def normalize_messages_for_template(messages: List[Dict[str, Any]]) -> List[Dict
         role = msg["role"]
         if role == "assistant" and msg.get("tool_calls"):
             tool_calls = []
-            for tool_call in msg["tool_calls"]:
+            for tool_call in msg.get("tool_calls"):
                 function = dict(tool_call.get("function") or {})
                 arguments = function.get("arguments", {})
                 if isinstance(arguments, str):
@@ -76,7 +76,14 @@ def normalize_messages_for_template(messages: List[Dict[str, Any]]) -> List[Dict
             continue
 
         if role == "tool":
-            item = {"role": "tool", "content": msg.get("content", "")}
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                content = "".join(text_parts)
+            item = {"role": "tool", "content": content}
             if msg.get("name"):
                 item["name"] = msg["name"]
             elif msg.get("tool_call_id") in tool_call_names:
@@ -87,7 +94,14 @@ def normalize_messages_for_template(messages: List[Dict[str, Any]]) -> List[Dict
             continue
 
         if "content" in msg:
-            formatted.append({"role": role, "content": msg["content"]})
+            content = msg["content"]
+            if isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                content = "".join(text_parts)
+            formatted.append({"role": role, "content": content})
     return formatted
 
 
@@ -119,6 +133,7 @@ async def lifespan(app: FastAPI):
     global model, tokenizer
     print("Loading optimized Gemma-4 into unified memory...")
     model, tokenizer = load(MODEL_SOURCE, size=MODEL_SIZE)
+    set_tokenizer_chat_template(tokenizer)
     print("Model loaded successfully and ready through MLX.")
     yield
     print("Unloading model from memory...")
@@ -126,6 +141,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="TheStage AI Edge-LM OpenAI Server", lifespan=lifespan)
 
+
+def set_tokenizer_chat_template(tokenizer):
+    # Gemma chat template (based on Hugging Face Gemma tokenizer)
+    template = "{% for message in messages %}{{'<bos>' if loop.first else ''}}{% if message['role'] == 'user' %}{{'<start_of_turn>user\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% elif message['role'] == 'assistant' %}{{'<start_of_turn>model\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% elif message['role'] == 'system' %}{{'<start_of_turn>system\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% endif %}{% endfor %}{% if add_generation_prompt %}{{'<start_of_turn>model\n'}}{% endif %}"
+    target = tokenizer
+    if hasattr(tokenizer, "_tokenizer"):
+        target = tokenizer._tokenizer
+    if target.chat_template is None:
+        target.chat_template = template
 
 @app.get("/v1/models")
 async def list_models():
@@ -215,6 +239,13 @@ async def chat_completions(body: Dict[str, Any]):
             await asyncio.sleep(0)
 
         generated_text = "".join(text_parts)
+        # Remove Gemma special turn tokens from the end
+        suffixes = ["<end_of_turn>", "<turn|>"]
+        for suf in suffixes:
+            if generated_text.endswith(suf):
+                generated_text = generated_text[: -len(suf)]
+                break
+        generated_text = generated_text.rstrip()
         elapsed = max(time.perf_counter() - started_at, 1e-9)
         print(
             f"[{chat_id}] done generated={generated_tokens} tokens, "
