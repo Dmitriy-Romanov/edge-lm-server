@@ -281,10 +281,10 @@ fn configure_from_menu(config: &mut Config) -> Result<(), String> {
         config.prefer_remote = true;
         config.preload_model = true;
         config.offline = true;
-        choose_model_and_size(config, true)?;
+        choose_model(config, true)?;
     } else {
         config.prefer_remote = true;
-        choose_model_and_size(config, false)?;
+        choose_model(config, false)?;
     }
 
     config.pi_models = vec![config.model.clone()];
@@ -342,19 +342,18 @@ fn choose_downloaded_model(downloaded: &[DownloadedModel]) -> Result<DownloadedM
     Ok(downloaded[index].clone())
 }
 
-fn choose_model_and_size(config: &mut Config, show_download_sizes: bool) -> Result<(), String> {
+fn choose_model(config: &mut Config, show_download_sizes: bool) -> Result<(), String> {
     println!();
     println!("Choose model:");
     for (index, option) in MODEL_OPTIONS.iter().enumerate() {
         if show_download_sizes {
             println!(
-                "  {}) {} ({}, {}; m {}, l {})",
+                "  {}) {} ({}, {}; default m download {})",
                 index + 1,
                 option.id,
                 option.name,
                 option.description,
-                option.size_m_download,
-                option.size_l_download
+                option.size_m_download
             );
         } else {
             println!(
@@ -378,18 +377,6 @@ fn choose_model_and_size(config: &mut Config, show_download_sizes: bool) -> Resu
         )
         .ok_or_else(|| "invalid model choice".to_string())?;
     config.model = option.id.to_string();
-
-    println!();
-    println!("Choose model size:");
-    if show_download_sizes {
-        println!("  1) m (default, download {})", option.size_m_download);
-        println!("  2) l (larger, download {})", option.size_l_download);
-    } else {
-        println!("  1) m (default, smaller)");
-        println!("  2) l (larger, needs more memory)");
-    }
-    let size = prompt_choice("Size", &["1", "2"], "1")?;
-    config.size = if size == "2" { "l" } else { "m" }.to_string();
 
     Ok(())
 }

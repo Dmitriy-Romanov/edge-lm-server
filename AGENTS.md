@@ -58,6 +58,9 @@ TheStageAI also publishes GGUF artifacts for llama.cpp-compatible runtimes, but
 this gateway currently uses native Edge-LM / MLX safetensors checkpoints. Do not
 add GGUF to the normal menu unless a llama.cpp backend is implemented.
 
+The normal menu uses size `m` by default and does not ask users to choose `m` vs
+`l`. Keep `--size l` as a manual advanced path.
+
 The user-facing entry point is:
 
 ```bash

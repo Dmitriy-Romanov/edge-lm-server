@@ -33,7 +33,6 @@ cd edge-lm-server
 - whether to pre-download/cache a model from Hugging Face or let Edge-LM fetch
   it on first run
 - which model to run
-- which size to run
 
 Model files are downloaded from the upstream TheStageAI repositories on Hugging
 Face. This repository intentionally does not distribute model weights through
@@ -62,10 +61,9 @@ These repositories also advertise GGUF files upstream, but this gateway uses
 the native Edge-LM / MLX checkpoint path, not llama.cpp. GGUF support would be a
 separate backend.
 
-For each model, the launcher can use:
-
-- `m`, the default size
-- `l`, the larger size
+The interactive menu uses size `m` by default. Size `l` is still available for
+manual runs through `--size l`, but it is intentionally not shown in the normal
+menu.
 
 Approximate model file sizes:
 
