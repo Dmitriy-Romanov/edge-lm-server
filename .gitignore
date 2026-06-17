@@ -2,5 +2,6 @@
 /.edge-lm-server/
 .DS_Store
 models/
+stats.json
 __pycache__/
 *.pyc

@@ -427,14 +427,22 @@ def preload_model(config: Config) -> None:
 
 def run_server(config: Config) -> None:
     model_source = resolve_model_source(config)
+    base_url = f"http://{config.host}:{config.port}"
+    status_url = f"{base_url}/status"
     print(
-        f"starting server at http://{config.host}:{config.port} using "
+        f"starting server at {terminal_link(base_url)} using "
         f"{model_alias(config.model, config.size)} ({config.model}, size {config.size}) "
         f"from {model_source}"
     )
+    print(f"status dashboard: {terminal_link(status_url)}")
     print(f"runtime: {config.runtime_dir}")
     env = runtime_env(config, model_source)
     subprocess.run([sys.executable, "-m", "edge_lm_server.server"], check=True, env=env, cwd=Path.cwd())
+
+
+def terminal_link(url: str, label: str | None = None) -> str:
+    text = label or url
+    return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
 
 def runtime_env(config: Config, model_source: Path | str) -> dict[str, str]:

@@ -10,6 +10,17 @@ and exposes it at:
 http://127.0.0.1:8000/v1
 ```
 
+While the server is running, a local status page is available at:
+
+```bash
+http://127.0.0.1:8000/status
+```
+
+It shows the current context/output limits, session generation statistics, and
+all-time totals stored in local `stats.json`.
+
+![Status dashboard](screenshot.png)
+
 ## Requirements
 
 - macOS on Apple silicon
