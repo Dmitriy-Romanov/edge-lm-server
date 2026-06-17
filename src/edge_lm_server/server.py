@@ -28,8 +28,18 @@ MAX_CONTEXT_TOKENS = int(os.environ.get("EDGE_LM_CONTEXT_TOKENS", "128000"))
 DEFAULT_MAX_TOKENS = 16000
 HOST = os.environ.get("EDGE_LM_HOST", "127.0.0.1")
 PORT = int(os.environ.get("EDGE_LM_PORT", "8000"))
-STATS_PATH = Path(os.environ.get("EDGE_LM_STATS_PATH", "stats.json"))
-FAVICON_PATH = Path(os.environ.get("EDGE_LM_FAVICON_PATH", "favicon.ico"))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def project_path_from_env(env_name: str, default_name: str) -> Path:
+    path = Path(os.environ.get(env_name, default_name)).expanduser()
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path
+
+
+STATS_PATH = project_path_from_env("EDGE_LM_STATS_PATH", "stats.json")
+FAVICON_PATH = project_path_from_env("EDGE_LM_FAVICON_PATH", "favicon.ico")
 SESSION_STARTED_AT = time.time()
 SESSION_STATS = {
     "active_requests": 0,
@@ -392,7 +402,8 @@ async def status_page():
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="/favicon.ico">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=1">
+  <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1">
   <title>edge-lm-server status</title>
   <style>
     :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
