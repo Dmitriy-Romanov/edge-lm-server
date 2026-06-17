@@ -56,8 +56,53 @@ def parse_gemma_tool_calls(text: str) -> List[Dict[str, Any]]:
         params = {}
         for param_match in PARAM_PATTERN.finditer(match.group(2)):
             params[param_match.group(1)] = param_match.group(2)
-        calls.append({"name": name, "arguments": params})
+        calls.append({"name": name, "arguments": normalize_tool_arguments(name, params)})
     return calls
+
+
+def normalize_tool_arguments(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(arguments)
+    if "path" not in normalized:
+        for alias in ("file_path", "filepath", "filename", "file"):
+            if alias in normalized:
+                normalized["path"] = normalized.pop(alias)
+                break
+    if name == "write" and "content" not in normalized:
+        for alias in ("text", "body", "data"):
+            if alias in normalized:
+                normalized["content"] = normalized.pop(alias)
+                break
+    return normalized
+
+
+def tool_call_text(function: Dict[str, Any]) -> str:
+    name = function.get("name", "")
+    arguments = function.get("arguments", {})
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            arguments = {"arguments": arguments}
+    parts = []
+    if isinstance(arguments, dict):
+        for key, value in arguments.items():
+            if not isinstance(value, str):
+                value = json.dumps(value, ensure_ascii=False)
+            parts.append(f'{key}:<|"|>{value}<|"|>')
+    return f"<|tool_call>call:{name}{{{''.join(parts)}}}<tool_call|>"
+
+
+def tool_instruction_message(tools: List[Dict[str, Any]]) -> Dict[str, str]:
+    schemas = json.dumps(tools, ensure_ascii=False)
+    content = (
+        "Tools are available. When a tool is needed, answer only with this exact format:\n"
+        '<|tool_call>call:tool_name{argument_name:<|"|>argument_value<|"|>}<tool_call|>\n'
+        "Include every required argument from the tool schema. For the write tool, always include "
+        "both path and content. Do not describe a shell command such as heredoc when a write tool "
+        "is available.\n\n"
+        f"Tool schemas:\n{schemas}"
+    )
+    return {"role": "system", "content": content}
 
 
 def normalize_messages_for_template(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -89,7 +134,13 @@ def normalize_messages_for_template(messages: List[Dict[str, Any]]) -> List[Dict
                         arguments = {"arguments": arguments}
                 function["arguments"] = arguments
                 tool_calls.append({"type": "function", "function": function})
-            formatted.append({"role": "assistant", "tool_calls": tool_calls})
+            formatted.append(
+                {
+                    "role": "assistant",
+                    "content": "".join(tool_call_text(item["function"]) for item in tool_calls),
+                    "tool_calls": tool_calls,
+                }
+            )
             continue
 
         if role == "tool":
@@ -168,7 +219,7 @@ app = FastAPI(title="TheStage AI Edge-LM OpenAI Server", lifespan=lifespan)
 
 def set_tokenizer_chat_template(tokenizer):
     # Gemma chat template (based on Hugging Face Gemma tokenizer)
-    template = "{% for message in messages %}{{'<bos>' if loop.first else ''}}{% if message['role'] == 'user' %}{{'<start_of_turn>user\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% elif message['role'] == 'assistant' %}{{'<start_of_turn>model\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% elif message['role'] == 'system' %}{{'<start_of_turn>system\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% endif %}{% endfor %}{% if add_generation_prompt %}{{'<start_of_turn>model\n'}}{% endif %}"
+    template = "{% for message in messages %}{{'<bos>' if loop.first else ''}}{% if message['role'] == 'user' %}{{'<start_of_turn>user\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% elif message['role'] == 'assistant' %}{{'<start_of_turn>model\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% elif message['role'] == 'tool' %}{{'<start_of_turn>user\nTool result' + ((' for ' + message['name']) if message['name'] is defined else '') + ':\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% elif message['role'] == 'system' %}{{'<start_of_turn>system\n' + (message['content'] | default('')) + '<end_of_turn>\n'}}{% endif %}{% endfor %}{% if add_generation_prompt %}{{'<start_of_turn>model\n'}}{% endif %}"
     target = tokenizer
     if hasattr(tokenizer, "_tokenizer"):
         target = tokenizer._tokenizer
@@ -448,6 +499,7 @@ async def chat_completions(body: Dict[str, Any]):
     template_kwargs = {}
     if body.get("tools"):
         template_kwargs["tools"] = body["tools"]
+        formatted_messages = [tool_instruction_message(body["tools"])] + formatted_messages
         tool_names = [
             tool.get("function", {}).get("name", "<unknown>")
             for tool in body["tools"]
