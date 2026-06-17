@@ -543,7 +543,6 @@ async def chat_completions(body: Dict[str, Any]):
         text_parts = []
         generated_tokens = 0
         started_at = time.perf_counter()
-        last_log_at = started_at
         stats_recorded = False
         try:
             for result in stream_generate(
@@ -555,15 +554,6 @@ async def chat_completions(body: Dict[str, Any]):
             ):
                 text_parts.append(result.text)
                 generated_tokens += 1
-                now = time.perf_counter()
-                if now - last_log_at >= 1.0:
-                    elapsed = max(now - started_at, 1e-9)
-                    print(
-                        f"[{chat_id}] generated={generated_tokens} tokens, "
-                        f"speed={generated_tokens / elapsed:.2f} tok/s",
-                        flush=True,
-                    )
-                    last_log_at = now
                 await asyncio.sleep(0)
 
             generated_text = "".join(text_parts).rstrip()
